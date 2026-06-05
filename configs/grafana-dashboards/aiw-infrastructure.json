@@ -1,0 +1,68 @@
+{
+  "annotations": {"list": []},
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 0,
+  "id": null,
+  "links": [],
+  "panels": [
+    {
+      "title": "VPS CPU Usage",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0},
+      "targets": [{"expr": "100 - (avg by(instance) (rate(node_cpu_seconds_total{mode=\"idle\"}[5m])) * 100)", "legendFormat": "CPU %", "refId": "A"}],
+      "fieldConfig": {"defaults": {"unit": "percent", "max": 100, "min": 0}, "overrides": []}
+    },
+    {
+      "title": "VPS Memory Usage",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0},
+      "targets": [{"expr": "(1 - node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes) * 100", "legendFormat": "Memory %", "refId": "A"}],
+      "fieldConfig": {"defaults": {"unit": "percent", "max": 100, "min": 0}, "overrides": []}
+    },
+    {
+      "title": "Disk Usage",
+      "type": "gauge",
+      "gridPos": {"h": 8, "w": 6, "x": 0, "y": 8},
+      "targets": [{"expr": "(1 - node_filesystem_avail_bytes{mountpoint=\"/\"} / node_filesystem_size_bytes{mountpoint=\"/\"}) * 100", "refId": "A"}],
+      "fieldConfig": {"defaults": {"unit": "percent", "max": 100, "min": 0, "thresholds": {"steps": [{"color": "green", "value": null}, {"color": "yellow", "value": 70}, {"color": "red", "value": 90}]}}, "overrides": []}
+    },
+    {
+      "title": "Running Containers",
+      "type": "stat",
+      "gridPos": {"h": 4, "w": 6, "x": 6, "y": 8},
+      "targets": [{"expr": "count(container_last_seen{name=~\".+\"} > time() - 60)", "refId": "A"}],
+      "fieldConfig": {"defaults": {"color": {"mode": "thresholds"}, "thresholds": {"steps": [{"color": "green", "value": null}]}}, "overrides": []}
+    },
+    {
+      "title": "Container Memory (Top 10)",
+      "type": "barchart",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8},
+      "targets": [{"expr": "topk(10, container_memory_usage_bytes{name=~\".+\"} / 1024 / 1024)", "legendFormat": "{{name}}", "refId": "A"}],
+      "fieldConfig": {"defaults": {"unit": "decmbytes"}, "overrides": []}
+    },
+    {
+      "title": "Network I/O",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 16},
+      "targets": [
+        {"expr": "rate(container_network_receive_bytes_total{id=\"/\"}[5m]) / 1024", "legendFormat": "RX KB/s", "refId": "A"},
+        {"expr": "rate(container_network_transmit_bytes_total{id=\"/\"}[5m]) / 1024", "legendFormat": "TX KB/s", "refId": "B"}
+      ],
+      "fieldConfig": {"defaults": {"unit": "KBs"}, "overrides": []}
+    },
+    {
+      "title": "LiteLLM Requests/s",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 16},
+      "targets": [{"expr": "rate(litellm_requests_total[5m])", "legendFormat": "{{model}}", "refId": "A"}],
+      "fieldConfig": {"defaults": {"unit": "reqps"}, "overrides": []}
+    }
+  ],
+  "schemaVersion": 39,
+  "tags": ["aiw", "infrastructure"],
+  "templating": {"list": []},
+  "time": {"from": "now-1h", "to": "now"},
+  "title": "AIW Infrastructure Overview",
+  "uid": "aiw-infra"
+}

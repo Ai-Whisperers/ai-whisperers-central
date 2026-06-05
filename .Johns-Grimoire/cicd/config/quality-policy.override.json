@@ -1,0 +1,6 @@
+{
+  "schemaVersion": 1,
+  "defaults": {},
+  "contexts": [],
+  "notes": "Override policy for repo-specific adjustments. Keep only diffs."
+}

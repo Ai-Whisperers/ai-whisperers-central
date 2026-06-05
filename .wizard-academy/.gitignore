@@ -1,0 +1,34 @@
+# Dependencies
+node_modules/
+vendor/
+
+# Build outputs
+dist/
+build/
+*.egg-info/
+
+# Environment
+.env
+.env.local
+*.local
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Reviews (internal analysis - not for public/consumption)
+reviews/
+
+# Audio processing intermediates
+*.wav
+*.mp3
+
+# Temporary files
+*.tmp
+*.temp

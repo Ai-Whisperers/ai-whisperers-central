@@ -1,0 +1,96 @@
+name: Deploy to VPS (build and SCP)
+
+on:
+  workflow_call:
+    inputs:
+      site-name:
+        description: 'Name of the site (matches clients.json key)'
+        required: true
+        type: string
+      node-version:
+        description: 'Node.js version'
+        required: false
+        type: string
+        default: '20'
+      package-manager:
+        description: 'npm or pnpm'
+        required: false
+        type: string
+        default: 'npm'
+      pnpm-version:
+        description: 'pnpm version'
+        required: false
+        type: string
+        default: '9'
+      working-directory:
+        description: 'Working directory'
+        required: false
+        type: string
+        default: '.'
+    secrets:
+      VPS_HOST:
+        required: true
+      VPS_USER:
+        required: true
+      VPS_KEY:
+        required: true
+      SUPABASE_URL:
+        required: false
+      SUPABASE_ANON_KEY:
+        required: false
+      SITE_URL:
+        required: false
+
+jobs:
+  deploy:
+    name: Deploy ${{ inputs.site-name }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: ${{ inputs.working-directory }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        if: inputs.package-manager == 'pnpm'
+        uses: pnpm/action-setup@v4
+        with:
+          version: ${{ inputs.pnpm-version }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ inputs.node-version }}
+          cache: ${{ inputs.package-manager }}
+
+      - name: Install dependencies
+        run: |
+          if [ "${{ inputs.package-manager }}" = "pnpm" ]; then
+            pnpm install --frozen-lockfile
+          else
+            npm ci
+          fi
+
+      - name: Build
+        run: |
+          if [ "${{ inputs.package-manager }}" = "pnpm" ]; then
+            pnpm build
+          else
+            npm run build
+          fi
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.SUPABASE_URL || 'https://placeholder.supabase.co' }}
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY || 'placeholder' }}
+          NEXT_PUBLIC_SITE_URL: ${{ secrets.SITE_URL || 'http://localhost:3000' }}
+
+      - name: Setup SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.VPS_KEY }}" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -H ${{ secrets.VPS_HOST }} >> ~/.ssh/known_hosts 2>/dev/null || true
+
+      - name: Deploy via SSH
+        run: |
+          ssh -o StrictHostKeyChecking=accept-new ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} \
+            "bash /opt/stacks/ci-cd/scripts/deploy.sh '${{ inputs.site-name }}' '${{ github.repository }}'"

@@ -1,0 +1,448 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <groupId>com.eneve.agent</groupId>
+    <artifactId>code-agent-runner</artifactId>
+    <version>1.0.0-SNAPSHOT</version>
+    <packaging>jar</packaging>
+
+    <name>Code Agent Runner</name>
+    <description>Self-hosted coding agent runner — clones repos, runs AI tool-use loop, validates with Maven, creates PRs, updates JIRA</description>
+
+    <properties>
+        <maven.compiler.release>21</maven.compiler.release>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <quarkus.platform.group-id>io.quarkus.platform</quarkus.platform.group-id>
+        <quarkus.platform.artifact-id>quarkus-bom</quarkus.platform.artifact-id>
+        <quarkus.platform.version>3.32.3</quarkus.platform.version>
+        <!-- Override Netty to 4.1.132.Final: fixes CVE-2026-33870 (HTTP smuggling) and CVE-2026-33871 (HTTP/2 resource exhaustion) -->
+        <netty.version>4.1.132.Final</netty.version>
+        <compiler-plugin.version>3.13.0</compiler-plugin.version>
+        <surefire-plugin.version>3.5.2</surefire-plugin.version>
+
+        <docker.exposePort>8183:8183</docker.exposePort>
+        <docker.file>Dockerfile</docker.file>
+        <docker.image.name>julesenergy/code-agent-runner</docker.image.name>
+        <docker.image.prefix>450019303360.dkr.ecr.eu-central-1.amazonaws.com</docker.image.prefix>
+        <docker.image.tag>${project.version}</docker.image.tag>
+
+    </properties>
+
+    <dependencyManagement>
+        <dependencies>
+            <!-- Netty override must come first so it wins over versions locked by quarkus-bom and aws bom -->
+            <!-- Fixes CVE-2026-33870 and CVE-2026-33871 (fixed in 4.1.132.Final) -->
+            <dependency>
+                <groupId>io.netty</groupId>
+                <artifactId>netty-bom</artifactId>
+                <version>${netty.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+            <dependency>
+                <groupId>${quarkus.platform.group-id}</groupId>
+                <artifactId>${quarkus.platform.artifact-id}</artifactId>
+                <version>${quarkus.platform.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+            <dependency>
+                <groupId>software.amazon.awssdk</groupId>
+                <artifactId>bom</artifactId>
+                <version>2.41.30</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+            <dependency>
+                <groupId>${quarkus.platform.group-id}</groupId>
+                <artifactId>quarkus-amazon-services-bom</artifactId>
+                <version>${quarkus.platform.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+        </dependencies>
+    </dependencyManagement>
+
+    <dependencies>
+        <!-- Quarkus REST (JAX-RS) -->
+        <dependency>
+            <groupId>io.quarkus</groupId>
+            <artifactId>quarkus-rest</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>io.quarkus</groupId>
+            <artifactId>quarkus-rest-jackson</artifactId>
+        </dependency>
+
+        <!-- Quarkus REST Client (for JIRA, Bitbucket, Teams, n8n calls) -->
+        <dependency>
+            <groupId>io.quarkus</groupId>
+            <artifactId>quarkus-rest-client</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>io.quarkus</groupId>
+            <artifactId>quarkus-rest-client-jackson</artifactId>
+        </dependency>
+
+        <!-- Anthropic Claude Java SDK -->
+        <dependency>
+            <groupId>com.anthropic</groupId>
+            <artifactId>anthropic-java</artifactId>
+            <version>2.15.0</version>
+        </dependency>
+
+        <!-- Apache PDFBox: extract text from PDF attachments during knowledge indexing -->
+        <dependency>
+            <groupId>org.apache.pdfbox</groupId>
+            <artifactId>pdfbox</artifactId>
+            <version>3.0.4</version>
+        </dependency>
+
+        <!-- Quarkus Arc (CDI) -->
+        <dependency>
+            <groupId>io.quarkus</groupId>
+            <artifactId>quarkus-arc</artifactId>
+        </dependency>
+
+        <!-- Quarkus Scheduler (optional, for rules cache refresh) -->
+        <dependency>
+            <groupId>io.quarkus</groupId>
+            <artifactId>quarkus-scheduler</artifactId>
+        </dependency>
+
+        <!-- OpenAPI + Swagger UI -->
+        <dependency>
+            <groupId>io.quarkus</groupId>
+            <artifactId>quarkus-smallrye-openapi</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>io.quarkus</groupId>
+            <artifactId>quarkus-swagger-ui</artifactId>
+        </dependency>
+
+        <!-- Health checks -->
+        <dependency>
+            <groupId>io.quarkus</groupId>
+            <artifactId>quarkus-smallrye-health</artifactId>
+        </dependency>
+
+        <!-- Keycloak OIDC (Bearer token validation for UI) -->
+        <dependency>
+            <groupId>io.quarkus</groupId>
+            <artifactId>quarkus-oidc</artifactId>
+        </dependency>
+
+        <!-- Keycloak Admin REST Client (proxies Admin API for user management) -->
+        <dependency>
+            <groupId>io.quarkus</groupId>
+            <artifactId>quarkus-keycloak-admin-rest-client</artifactId>
+        </dependency>
+
+        <!-- Structured JSON logging for CloudWatch / log aggregators -->
+        <dependency>
+            <groupId>io.quarkus</groupId>
+            <artifactId>quarkus-logging-json</artifactId>
+        </dependency>
+
+        <!-- MicroProfile context propagation — provides ManagedExecutor for Quarkus-managed threads -->
+        <dependency>
+            <groupId>io.quarkus</groupId>
+            <artifactId>quarkus-smallrye-context-propagation</artifactId>
+        </dependency>
+
+        <!-- PostgreSQL JDBC + Connection Pool + Flyway -->
+        <dependency>
+            <groupId>io.quarkus</groupId>
+            <artifactId>quarkus-jdbc-postgresql</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>io.quarkus</groupId>
+            <artifactId>quarkus-agroal</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>io.quarkus</groupId>
+            <artifactId>quarkus-flyway</artifactId>
+        </dependency>
+
+        <!-- SnakeYAML for .mdc frontmatter parsing -->
+        <dependency>
+            <groupId>org.yaml</groupId>
+            <artifactId>snakeyaml</artifactId>
+        </dependency>
+
+        <!-- JavaParser for code graph AST analysis + symbol resolution -->
+        <dependency>
+            <groupId>com.github.javaparser</groupId>
+            <artifactId>javaparser-core</artifactId>
+            <version>3.26.4</version>
+        </dependency>
+        <dependency>
+            <groupId>com.github.javaparser</groupId>
+            <artifactId>javaparser-symbol-solver-core</artifactId>
+            <version>3.26.4</version>
+        </dependency>
+
+        <!-- Tree-sitter Java bindings (JNI, Java 11+) for C#/TypeScript/PHP code graph indexing -->
+        <dependency>
+            <groupId>ch.usi.si.seart</groupId>
+            <artifactId>java-tree-sitter</artifactId>
+            <version>1.12.0</version>
+        </dependency>
+
+        <!-- Structurizr DSL: parse/validate Structurizr DSL + export views to Mermaid (structurizr-export is a transitive dep) -->
+        <dependency>
+            <groupId>com.structurizr</groupId>
+            <artifactId>structurizr-dsl</artifactId>
+            <version>4.1.0</version>
+        </dependency>
+
+        <!-- Jsoup for HTML-to-text conversion in the fetch_url tool -->
+        <dependency>
+            <groupId>org.jsoup</groupId>
+            <artifactId>jsoup</artifactId>
+            <version>1.21.1</version>
+        </dependency>
+
+        <!-- AWS SDK v2: cross-account STS AssumeRole + read-only CloudWatch/ECS tools -->
+        <dependency>
+            <groupId>software.amazon.awssdk</groupId>
+            <artifactId>sts</artifactId>
+        </dependency>
+        <!-- AWS SDK v2: Amazon Transcribe Streaming (speech-to-text, replaces local Whisper sidecar) -->
+        <dependency>
+            <groupId>software.amazon.awssdk</groupId>
+            <artifactId>transcribestreaming</artifactId>
+        </dependency>
+        <!-- Netty NIO HTTP/2 client required by TranscribeStreamingAsyncClient -->
+        <dependency>
+            <groupId>software.amazon.awssdk</groupId>
+            <artifactId>netty-nio-client</artifactId>
+        </dependency>
+        <!-- AWS SDK v2: Bedrock embeddings (InvokeModel) and reranking -->
+        <dependency>
+            <groupId>software.amazon.awssdk</groupId>
+            <artifactId>bedrockruntime</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>software.amazon.awssdk</groupId>
+            <artifactId>bedrockagentruntime</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>software.amazon.awssdk</groupId>
+            <artifactId>cloudwatchlogs</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>software.amazon.awssdk</groupId>
+            <artifactId>ecs</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>software.amazon.awssdk</groupId>
+            <artifactId>cloudwatch</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>software.amazon.awssdk</groupId>
+            <artifactId>rds</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>software.amazon.awssdk</groupId>
+            <artifactId>ses</artifactId>
+        </dependency>
+        <!-- AWS SDK v2: EC2 (VPCs, subnets, instances, security groups) for cloud architecture discovery -->
+        <dependency>
+            <groupId>software.amazon.awssdk</groupId>
+            <artifactId>ec2</artifactId>
+        </dependency>
+        <!-- AWS SDK v2: Elastic Load Balancing v2 (ALB/NLB) for cloud architecture discovery -->
+        <dependency>
+            <groupId>software.amazon.awssdk</groupId>
+            <artifactId>elasticloadbalancingv2</artifactId>
+        </dependency>
+        <!-- AWS SDK v2: ElastiCache for cloud architecture discovery -->
+        <dependency>
+            <groupId>software.amazon.awssdk</groupId>
+            <artifactId>elasticache</artifactId>
+        </dependency>
+        <!-- AWS SDK v2: Lambda for cloud architecture discovery -->
+        <dependency>
+            <groupId>software.amazon.awssdk</groupId>
+            <artifactId>lambda</artifactId>
+        </dependency>
+        <!-- AWS SDK v2: S3 for cloud architecture discovery -->
+        <dependency>
+            <groupId>software.amazon.awssdk</groupId>
+            <artifactId>s3</artifactId>
+        </dependency>
+        <!-- AWS SDK v2: CloudFront (global CDN) for cloud architecture discovery -->
+        <dependency>
+            <groupId>software.amazon.awssdk</groupId>
+            <artifactId>cloudfront</artifactId>
+        </dependency>
+
+        <!-- pgvector JDBC support for semantic code search -->
+        <dependency>
+            <groupId>com.pgvector</groupId>
+            <artifactId>pgvector</artifactId>
+            <version>0.1.6</version>
+        </dependency>
+
+        <!-- Quarkus test -->
+        <dependency>
+            <groupId>io.quarkiverse.amazonservices</groupId>
+            <artifactId>quarkus-amazon-s3</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>software.amazon.awssdk</groupId>
+            <artifactId>url-connection-client</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>io.quarkus</groupId>
+            <artifactId>quarkus-junit5</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>io.quarkus</groupId>
+            <artifactId>quarkus-junit5-mockito</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>io.quarkus</groupId>
+            <artifactId>quarkus-test-security</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>io.rest-assured</groupId>
+            <artifactId>rest-assured</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>${quarkus.platform.group-id}</groupId>
+                <artifactId>quarkus-maven-plugin</artifactId>
+                <version>${quarkus.platform.version}</version>
+                <extensions>true</extensions>
+                <executions>
+                    <execution>
+                        <goals>
+                            <goal>build</goal>
+                            <goal>generate-code</goal>
+                            <!-- Temporarily disable generate-code-tests due to Maven version compatibility issue -->
+                            <!-- <goal>generate-code-tests</goal> -->
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
+            <plugin>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <version>${compiler-plugin.version}</version>
+                <configuration>
+                    <release>${maven.compiler.release}</release>
+                    <parameters>true</parameters>
+                </configuration>
+            </plugin>
+            <plugin>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <version>${surefire-plugin.version}</version>
+                <configuration>
+                    <!-- @{argLine} is populated by jacoco:prepare-agent before tests run -->
+                    <argLine>@{argLine} -Djava.util.logging.manager=org.jboss.logmanager.LogManager</argLine>
+                    <systemPropertyVariables>
+                        <java.util.logging.manager>org.jboss.logmanager.LogManager</java.util.logging.manager>
+                    </systemPropertyVariables>
+                </configuration>
+            </plugin>
+            <plugin>
+                <groupId>org.jacoco</groupId>
+                <artifactId>jacoco-maven-plugin</artifactId>
+                <version>0.8.13</version>
+                <executions>
+                    <!-- Sets argLine so the JaCoCo agent is injected into the test JVM -->
+                    <execution>
+                        <id>prepare-agent</id>
+                        <goals>
+                            <goal>prepare-agent</goal>
+                        </goals>
+                    </execution>
+                    <!-- Generates target/site/jacoco/jacoco.xml after tests complete -->
+                    <execution>
+                        <id>report</id>
+                        <phase>test</phase>
+                        <goals>
+                            <goal>report</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
+            <plugin>
+                <artifactId>maven-deploy-plugin</artifactId>
+                <version>3.1.2</version>
+                <configuration>
+                    <skip>true</skip>
+                </configuration>
+            </plugin>
+            <plugin>
+                <groupId>org.codehaus.mojo</groupId>
+                <artifactId>exec-maven-plugin</artifactId>
+                <version>3.0.0</version>
+                <executions>
+                    <execution>
+                        <id>docker-login</id>
+                        <phase>deploy</phase>
+                        <goals>
+                            <goal>exec</goal>
+                        </goals>
+                        <configuration>
+                            <executable>sh</executable>
+                            <workingDirectory>${project.basedir}</workingDirectory>
+                            <arguments>
+                                <argument>-c</argument>
+                                <argument>aws ecr get-login-password --region eu-central-1 | docker login --username AWS --password-stdin ${docker.image.prefix}</argument>
+                            </arguments>
+                        </configuration>
+                    </execution>
+                    <execution>
+                        <id>docker-build</id>
+                        <phase>deploy</phase>
+                        <goals>
+                            <goal>exec</goal>
+                        </goals>
+                        <configuration>
+                            <executable>docker</executable>
+                            <workingDirectory>${project.basedir}</workingDirectory>
+                            <arguments>
+                                <argument>buildx</argument>
+                                <argument>build</argument>
+                                <argument>--no-cache</argument>
+                                <argument>--platform=linux/amd64</argument>
+                                <argument>-f</argument>
+                                <argument>${docker.file}</argument>
+                                <argument>-t</argument>
+                                <argument>${docker.image.prefix}/${docker.image.name}:${docker.image.tag}</argument>
+                                <argument>.</argument>
+                            </arguments>
+                        </configuration>
+                    </execution>
+                    <execution>
+                        <id>docker-deploy</id>
+                        <phase>deploy</phase>
+                        <goals>
+                            <goal>exec</goal>
+                        </goals>
+                        <configuration>
+                            <executable>docker</executable>
+                            <workingDirectory>${project.basedir}</workingDirectory>
+                            <arguments>
+                                <argument>push</argument>
+                                <argument>${docker.image.prefix}/${docker.image.name}:${docker.image.tag}</argument>
+                            </arguments>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+
+        </plugins>
+    </build>
+</project>

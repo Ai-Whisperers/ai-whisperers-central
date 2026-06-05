@@ -1,0 +1,35 @@
+name: Security Scan
+
+on:
+  workflow_call:
+
+jobs:
+  secrets-scan:
+    name: Secrets Scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: TruffleHog
+        uses: trufflesecurity/trufflehog@main
+        with:
+          path: ./
+          base: ${{ github.event.repository.default_branch }}
+          head: HEAD
+
+  npm-audit:
+    name: npm audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Install
+        run: npm ci 2>/dev/null || true
+      - name: Audit
+        run: npm audit --audit-level=high 2>/dev/null || echo "npm audit found issues (non-blocking)"
+        continue-on-error: true

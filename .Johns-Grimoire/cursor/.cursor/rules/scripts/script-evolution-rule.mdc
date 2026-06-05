@@ -1,0 +1,137 @@
+---
+id: rule.scripts.evolution.v1
+kind: rule
+version: 1.0.0
+description: Scripts are living tools that should be preferred, enhanced, and evolved - not bypassed with manual commands or one-off workarounds
+globs: **/*.ps1, **/*.py
+governs: **/*.ps1, **/*.py
+implements: scripts.evolution-philosophy
+requires: []
+model_hints: { temp: 0.2, top_p: 0.9 }
+provenance: 
+  owner: team-devops
+  last_review: 2025-12-14
+  created: 2025-12-14
+alwaysApply: false
+---
+
+# Script Evolution Philosophy
+
+## Purpose & Scope
+
+Defines the philosophy for how teams should interact with automation scripts: **prefer existing scripts, extend them when needed, and treat them as living tools that evolve with the codebase**.
+
+**Applies to**: All automation scripts in `.cursor/scripts/` and other script directories used for code quality, CI/CD, validation, and development workflows.
+
+**Does not apply to**: One-time exploratory commands, personal dev scripts outside version control.
+
+## Core Philosophy: Scripts Are Living Tools, Not Fossil Relics
+
+Scripts are **team-maintained automation** that should be:
+- ✅ **Preferred** over manual commands
+- ✅ **Extended** when missing functionality
+- ✅ **Evolved** as requirements change
+- ✅ **Standardized** for team consistency
+- ❌ **NOT bypassed** with ad-hoc manual commands
+- ❌ **NOT duplicated** with one-off scripts
+
+**Key Principle**: Scripts represent **accumulated team knowledge** - they improve with use, feedback, and enhancement.
+
+## Inputs (Contract)
+
+- Task requiring automation (build, test, validation, formatting, etc.)
+- Existing script directory structure (`.cursor/scripts/quality/`, etc.)
+- Understanding of what scripts already exist
+- Knowledge of team scripting standards
+
+## Outputs (Contract)
+
+- ✅ Appropriate script used for task
+- ✅ Script enhanced if functionality missing
+- ✅ New script created and proposed for standardization (if no script exists)
+- ✅ Team benefits from improved tooling
+- ❌ NO manual command workarounds
+- ❌ NO undocumented one-off scripts
+
+## Rule 1: Always Prefer Existing Scripts Over Manual Commands
+
+### The Principle
+
+**IF a script exists, USE IT** - don't create manual command alternatives.
+
+### Why Scripts Win
+
+Scripts provide:
+- ✅ **Consistency**: Same behavior every time, every developer
+- ✅ **Better diagnostics**: Helpful error messages with guidance
+- ✅ **Formatted output**: Parsed, clickable, actionable results
+- ✅ **Team maintenance**: Fixes benefit everyone
+- ✅ **Documentation**: Built-in help and examples
+- ✅ **Configuration**: Parameterized for different scenarios
+- ✅ **CI/CD ready**: Work in both local and pipeline environments
+
+Manual commands lack:
+- ❌ No error guidance
+- ❌ Raw output hard to parse
+- ❌ Knowledge lives in one person's head
+- ❌ Inconsistent usage across team
+- ❌ No shared improvements
+
+## Rule 2: Extend Scripts When Functionality Is Missing
+
+### The Principle
+
+**IF a script doesn't handle your use case, ENHANCE THE SCRIPT** - don't work around it.
+
+### Why Enhancement Wins
+
+When you extend a script:
+- ✅ Team benefits from new functionality
+- ✅ Knowledge is captured and shared
+- ✅ Future use cases are handled
+- ✅ Script becomes more powerful over time
+- ✅ Documentation grows organically
+
+When you bypass a script:
+- ❌ You create technical debt
+- ❌ Next person hits the same limitation
+- ❌ Manual workarounds proliferate
+- ❌ Team loses consistency
+
+## Rule 3: Create New Scripts for Repeated Tasks
+
+### The Principle
+
+**IF no script exists and you need to run a task repeatedly, CREATE A SCRIPT and propose it for standardization**.
+
+### When to Create New Scripts
+
+Create a new script when:
+- ✅ Task will be run multiple times (by you or others)
+- ✅ Task has multiple steps that should be atomic
+- ✅ Task requires specific configuration or validation
+- ✅ Task would benefit from consistent execution
+- ✅ Task is part of a workflow (code quality, CI/CD, release)
+
+Don't create a script for:
+- ❌ One-time exploratory tasks
+- ❌ Personal-only workflows
+- ❌ Tasks that vary wildly each time
+
+## Rule 4: Scripts Evolve With Feedback
+
+### The Principle
+
+**Scripts improve through use** - treat them as living tools that grow with team needs.
+
+## Summary
+
+**Scripts Are Living Tools**:
+1. ✅ **Use scripts first** - don't bypass with manual commands
+2. ✅ **Extend scripts** when missing functionality - don't work around
+3. ✅ **Create scripts** for repeated tasks - propose for standardization
+4. ✅ **Evolve scripts** with feedback - they improve through use
+5. ❌ **Don't bypass** scripts with manual alternatives
+6. ❌ **Don't duplicate** with one-off scripts
+
+**Key Mindset**: Scripts represent accumulated team knowledge and should be preferred, enhanced, and evolved - not fossilized or bypassed.

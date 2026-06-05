@@ -1,0 +1,106 @@
+{
+  "schemaVersion": "1.0",
+  "description": "Config-driven analyzer severity dial. TreatWarningsAsErrors is enforced centrally; this file controls which diagnostics are 'suggestion' vs 'warning' (and therefore effectively errors in builds).",
+  "defaultPhase": "baseline",
+  "managedBlock": {
+    "beginMarker": "# BEGIN QUALITY DIAL (managed by cicd/scripts/quality-dial.ps1)",
+    "endMarker": "# END QUALITY DIAL (managed by cicd/scripts/quality-dial.ps1)"
+  },
+  "diagnostics": [
+    { "id": "IDE0005", "description": "Remove unnecessary usings" },
+    { "id": "IDE0055", "description": "Fix formatting" },
+    { "id": "IDE0161", "description": "Convert to file-scoped namespace" },
+    { "id": "CA1062", "description": "Validate arguments of public methods" },
+    { "id": "CA1303", "description": "Do not pass literals as localized parameters" },
+    { "id": "CA1304", "description": "Specify CultureInfo" },
+    { "id": "CA1305", "description": "Specify IFormatProvider" },
+    { "id": "CA1307", "description": "Specify StringComparison for clarity" },
+    { "id": "CA1310", "description": "Specify StringComparison for correctness" },
+    { "id": "CA1707", "description": "Identifiers should not contain underscores" },
+    { "id": "CA1716", "description": "Identifiers should not match keywords" },
+    { "id": "CA1812", "description": "Avoid uninstantiated internal classes" },
+    { "id": "CA1848", "description": "Use LoggerMessage delegates" },
+    { "id": "CA1861", "description": "Avoid constant arrays as arguments" },
+    { "id": "CA2007", "description": "Consider calling ConfigureAwait" }
+  ],
+  "phases": {
+    "baseline": {
+      "description": "Current/default behavior: keep many diagnostics as suggestion/none so teams can fix incrementally without breaking builds.",
+      "severities": {
+        "IDE0005": "warning",
+        "IDE0055": "warning",
+        "IDE0161": "warning",
+        "CA1062": "suggestion",
+        "CA1303": "none",
+        "CA1304": "suggestion",
+        "CA1305": "suggestion",
+        "CA1307": "suggestion",
+        "CA1310": "warning",
+        "CA1707": "warning",
+        "CA1716": "suggestion",
+        "CA1812": "suggestion",
+        "CA1848": "suggestion",
+        "CA1861": "suggestion",
+        "CA2007": "none"
+      }
+    },
+    "tighten-1": {
+      "description": "First dial-up: correctness-oriented rules become warning (and therefore errors under TreatWarningsAsErrors).",
+      "severities": {
+        "IDE0005": "warning",
+        "IDE0055": "warning",
+        "IDE0161": "warning",
+        "CA1062": "warning",
+        "CA1303": "none",
+        "CA1304": "warning",
+        "CA1305": "warning",
+        "CA1307": "warning",
+        "CA1310": "warning",
+        "CA1707": "warning",
+        "CA1716": "warning",
+        "CA1812": "suggestion",
+        "CA1848": "suggestion",
+        "CA1861": "suggestion",
+        "CA2007": "none"
+      }
+    },
+    "tighten-2": {
+      "description": "Second dial-up: additional maintainability/perf rules become warning.",
+      "severities": {
+        "IDE0005": "warning",
+        "IDE0055": "warning",
+        "IDE0161": "warning",
+        "CA1062": "warning",
+        "CA1303": "none",
+        "CA1304": "warning",
+        "CA1305": "warning",
+        "CA1307": "warning",
+        "CA1310": "warning",
+        "CA1707": "warning",
+        "CA1716": "warning",
+        "CA1812": "warning",
+        "CA1848": "warning",
+        "CA1861": "warning",
+        "CA2007": "none"
+      }
+    }
+  },
+  "temporaryRelaxations": [
+    {
+      "diagnosticId": "CA1861",
+      "severity": "suggestion",
+      "expiresOn": "2099-01-01",
+      "ticketId": "EPP-192",
+      "reason": "Example placeholder: use this to temporarily relax a rule to keep builds green while automation is introduced. MUST be removed or extended intentionally."
+    }
+  ],
+  "testProjectOverrides": {
+    "glob": "tst/**/*.cs",
+    "severities": {
+      "CA1707": "none",
+      "CS1591": "none"
+    }
+  }
+}
+
+

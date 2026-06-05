@@ -1,0 +1,791 @@
+package com.eneve.agent.workspace;
+
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.attribute.FileTime;
+import java.util.Comparator;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.TimeUnit;
+import java.util.stream.Stream;
+
+import org.jboss.logging.Logger;
+
+/**
+ * Manages an isolated workspace directory for a single agent job.
+ * Handles cloning the repo, path resolution with traversal protection, and cleanup.
+ *
+ * <p>Plan-managed workspaces ({@link #createPlanManaged}) survive across multiple job steps:
+ * {@link #close()} is a no-op so the try-with-resources in each handler does not delete the
+ * directory. The owning {@code PlanWorkspaceManager} calls {@link #forceClose()} when the
+ * plan reaches a terminal state.
+ */
+public class WorkspaceContext implements AutoCloseable {
+
+    private static final Logger LOG = Logger.getLogger(WorkspaceContext.class);
+
+    private final Path root;
+    private final Map<String, String> metadata = new HashMap<>();
+    private final Map<String, Path> clonedRepos = new HashMap<>(); // repoSlug -> subdirectory path
+    // Tracks the mtime at the time each file was last read; used by EditFileTool for staleness checks.
+    private final Map<String, FileTime> fileReadTimestamps = new ConcurrentHashMap<>();
+    private boolean planManaged;
+    private boolean keepOnClose;
+    private String userId;
+    private String conversationId;
+
+    private WorkspaceContext(Path root) {
+        this.root = root;
+    }
+
+    /**
+     * Set the user ID for MCP tool credential resolution.
+     */
+    public void setUserId(String userId) {
+        this.userId = userId;
+    }
+
+    /**
+     * Get the user ID for MCP tool credential resolution.
+     */
+    public String getUserId() {
+        return userId;
+    }
+
+    /**
+     * Set the conversation ID so tools can persist context back to the database.
+     */
+    public void setConversationId(String conversationId) {
+        this.conversationId = conversationId;
+    }
+
+    /**
+     * Get the conversation ID, or {@code null} for non-chat workspaces.
+     */
+    public String getConversationId() {
+        return conversationId;
+    }
+
+    public static WorkspaceContext create(String jobId) throws IOException {
+        Path tmp = Files.createTempDirectory("agent-job-" + jobId + "-");
+        LOG.infof("Created workspace: %s", tmp);
+        return new WorkspaceContext(tmp);
+    }
+
+    /**
+     * Reuses an existing workspace directory from a previous (failed) job.
+     * The directory must exist and already contain a cloned repository.
+     * Returns {@code null} if the path is blank, does not exist, or has no {@code .git} directory.
+     */
+    public static WorkspaceContext reuse(String workspacePath) {
+        if (workspacePath == null || workspacePath.isBlank()) return null;
+        Path root = Path.of(workspacePath);
+        if (!Files.exists(root) || !Files.isDirectory(root)) {
+            LOG.warnf("Cannot reuse workspace — directory does not exist: %s", workspacePath);
+            return null;
+        }
+        if (!Files.exists(root.resolve(".git"))) {
+            LOG.warnf("Cannot reuse workspace — no .git directory found: %s", workspacePath);
+            return null;
+        }
+        LOG.infof("Reusing preserved workspace: %s", root);
+        return new WorkspaceContext(root);
+    }
+
+    /**
+     * Creates a workspace whose lifecycle is managed by {@code PlanWorkspaceManager}.
+     * {@link #close()} is a no-op; use {@link #forceClose()} to actually delete it.
+     */
+    public static WorkspaceContext createPlanManaged(String planId) throws IOException {
+        Path tmp = Files.createTempDirectory("agent-plan-" + planId.substring(0, 8) + "-");
+        LOG.infof("Created plan-managed workspace: %s (plan %s)", tmp, planId);
+        WorkspaceContext ws = new WorkspaceContext(tmp);
+        ws.planManaged = true;
+        return ws;
+    }
+
+    /**
+     * Returns {@code true} if a git repository has already been cloned into this workspace
+     * (i.e. {@code .git} directory exists at the root).
+     */
+    public boolean hasClonedRepo() {
+        return Files.exists(root.resolve(".git")) || !clonedRepos.isEmpty();
+    }
+
+    /**
+     * Returns {@code true} if the specified repository slug has been cloned into a subdirectory.
+     */
+    public boolean hasClonedRepo(String repoSlug) {
+        if (repoSlug == null || repoSlug.isBlank()) {
+            return hasClonedRepo();
+        }
+        return clonedRepos.containsKey(repoSlug);
+    }
+
+    /**
+     * Returns the path to the specified repository subdirectory, or null if not cloned.
+     */
+    public Path getRepoPath(String repoSlug) {
+        return clonedRepos.get(repoSlug);
+    }
+
+    /**
+     * Returns the set of cloned repository slugs.
+     */
+    public Set<String> listClonedRepos() {
+        return Set.copyOf(clonedRepos.keySet());
+    }
+
+    public Path getRoot() {
+        return root;
+    }
+
+    public void putMetadata(String key, String value) {
+        metadata.put(key, value);
+    }
+
+    public String getMetadata(String key) {
+        return metadata.get(key);
+    }
+
+    /**
+     * Clone the repo into this workspace.
+     * Uses authenticated HTTPS URL for Bitbucket Cloud.
+     */
+    public void cloneRepo(String authenticatedUrl, String branchName, long timeoutMinutes)
+            throws IOException, InterruptedException {
+
+        runGit(timeoutMinutes, "clone", "--depth", "50", "--branch", branchName, authenticatedUrl, ".");
+        LOG.infof("Cloned repo into %s on branch %s", root, branchName);
+    }
+
+    /**
+     * Shallow clone (depth 1) suitable for read-only operations such as metrics scanning.
+     * Fetches only the latest tree, which is significantly faster for large repos with
+     * long histories compared to the standard depth-50 clone.
+     */
+    public void cloneRepoShallow(String authenticatedUrl, String branchName, long timeoutMinutes)
+            throws IOException, InterruptedException {
+
+        runGit(timeoutMinutes, "clone", "--depth", "1", "--branch", branchName, authenticatedUrl, ".");
+        LOG.infof("Shallow-cloned repo into %s on branch %s", root, branchName);
+    }
+
+    /**
+     * Full (unshallow) clone — fetches complete git history.
+     * Required for operations that need to traverse the full commit log, such as
+     * the Knowledge Graph analyser which runs {@code git log --since=<N>days}.
+     */
+    public void cloneRepoFull(String authenticatedUrl, String branchName, long timeoutMinutes)
+            throws IOException, InterruptedException {
+
+        runGit(timeoutMinutes, "clone", "--branch", branchName, authenticatedUrl, ".");
+        LOG.infof("Full-cloned repo into %s on branch %s", root, branchName);
+    }
+
+    /**
+     * Clone, then create and checkout a new branch.
+     * Useful when the branch doesn't exist on the remote yet.
+     */
+    public void cloneAndCreateBranch(String authenticatedUrl, String baseBranch, String newBranch,
+                                     long timeoutMinutes) throws IOException, InterruptedException {
+        runGit(timeoutMinutes, "clone", "--depth", "50", "--branch", baseBranch, authenticatedUrl, ".");
+        runGit(timeoutMinutes, "checkout", "-b", newBranch);
+        LOG.infof("Cloned repo on %s and created branch %s", baseBranch, newBranch);
+    }
+
+    /**
+     * Clone a repository into a subdirectory for multi-repo workspace support.
+     * Creates the subdirectory if it doesn't exist.
+     */
+    public void cloneRepoToSubdir(String repoSlug, String authenticatedUrl, String branchName, long timeoutMinutes)
+            throws IOException, InterruptedException {
+        
+        if (repoSlug == null || repoSlug.isBlank()) {
+            throw new IllegalArgumentException("repoSlug cannot be null or blank");
+        }
+        
+        Path repoDir = root.resolve(repoSlug);
+        if (Files.exists(repoDir)) {
+            if (clonedRepos.containsKey(repoSlug)) {
+                LOG.infof("Repository %s already cloned in %s", repoSlug, repoDir);
+                return;
+            }
+            throw new IOException("Directory " + repoDir + " already exists but is not tracked as a cloned repo");
+        }
+        
+        Files.createDirectories(repoDir);
+        
+        // Clone into the subdirectory
+        ProcessBuilder pb = new ProcessBuilder("git", "clone", "--depth", "50", "--branch", branchName, authenticatedUrl, ".")
+                .directory(repoDir.toFile())
+                .redirectErrorStream(true);
+        
+        Process proc = pb.start();
+        boolean finished = proc.waitFor(timeoutMinutes, TimeUnit.MINUTES);
+        
+        if (!finished) {
+            proc.destroyForcibly();
+            throw new IOException("Git clone timed out after " + timeoutMinutes + " minutes");
+        }
+        
+        if (proc.exitValue() != 0) {
+            String output = new String(proc.getInputStream().readAllBytes());
+            throw new IOException("Git clone failed (exit " + proc.exitValue() + "): " + output);
+        }
+        
+        clonedRepos.put(repoSlug, repoDir);
+        LOG.infof("Cloned repository %s into %s on branch %s", repoSlug, repoDir, branchName);
+    }
+
+    /**
+     * Shallow clone a repository into a subdirectory for read-only operations.
+     */
+    public void cloneRepoToSubdirShallow(String repoSlug, String authenticatedUrl, String branchName, long timeoutMinutes)
+            throws IOException, InterruptedException {
+        
+        if (repoSlug == null || repoSlug.isBlank()) {
+            throw new IllegalArgumentException("repoSlug cannot be null or blank");
+        }
+        
+        Path repoDir = root.resolve(repoSlug);
+        if (Files.exists(repoDir)) {
+            if (clonedRepos.containsKey(repoSlug)) {
+                LOG.infof("Repository %s already cloned in %s", repoSlug, repoDir);
+                return;
+            }
+            throw new IOException("Directory " + repoDir + " already exists but is not tracked as a cloned repo");
+        }
+        
+        Files.createDirectories(repoDir);
+        
+        // Shallow clone into the subdirectory
+        ProcessBuilder pb = new ProcessBuilder("git", "clone", "--depth", "1", "--branch", branchName, authenticatedUrl, ".")
+                .directory(repoDir.toFile())
+                .redirectErrorStream(true);
+        
+        Process proc = pb.start();
+        boolean finished = proc.waitFor(timeoutMinutes, TimeUnit.MINUTES);
+        
+        if (!finished) {
+            proc.destroyForcibly();
+            throw new IOException("Git clone timed out after " + timeoutMinutes + " minutes");
+        }
+        
+        if (proc.exitValue() != 0) {
+            String output = new String(proc.getInputStream().readAllBytes());
+            throw new IOException("Git clone failed (exit " + proc.exitValue() + "): " + output);
+        }
+        
+        clonedRepos.put(repoSlug, repoDir);
+        LOG.infof("Shallow-cloned repository %s into %s on branch %s", repoSlug, repoDir, branchName);
+    }
+
+    /**
+     * Configure git user identity for commits in this workspace.
+     * Required for Repository Access Tokens where the author must match the bot email.
+     */
+    public void configureAuthor(String name, String email) throws IOException, InterruptedException {
+        runGit(1, "config", "user.name", name);
+        runGit(1, "config", "user.email", email);
+        LOG.infof("Configured git author: %s <%s>", name, email);
+    }
+
+    /**
+     * Stage and commit all changes. Returns true if a commit was made, false if working tree was clean.
+     */
+    public boolean commitAll(String message) throws IOException, InterruptedException {
+        runGit(5, "add", "-A");
+        String status = runGitOutput(1, "status", "--porcelain");
+        if (status.isBlank()) {
+            LOG.info("Nothing to commit — working tree clean");
+            return false;
+        }
+        runGit(5, "commit", "-m", message);
+        return true;
+    }
+
+    public void createBranch(String branchName) throws IOException, InterruptedException {
+        runGit(1, "checkout", "-b", branchName);
+        LOG.infof("Created and checked out branch %s", branchName);
+    }
+
+    public void push(String branchName, long timeoutMinutes) throws IOException, InterruptedException {
+        runGit(timeoutMinutes, "push", "origin", branchName);
+    }
+
+    /**
+     * Commits any pending changes as an agent checkpoint and force-pushes the commit to a
+     * single, stable remote ref ({@code refs/heads/agent/checkpoint/<jobId>}).
+     *
+     * <p>Only one remote branch is maintained per job (force-push), so there is no branch
+     * proliferation regardless of how many iterations the agent runs. The returned SHA is
+     * stored in {@code job_checkpoints} and is the canonical reference used to restore the
+     * workspace on restart.
+     *
+     * @param jobId     job ID used to name the checkpoint branch
+     * @param iteration zero-based iteration number (used in the commit message only)
+     * @return the full commit SHA after the commit+push, or the current HEAD SHA if there
+     *         was nothing new to commit
+     * @throws IOException          if a git command fails
+     * @throws InterruptedException if the thread is interrupted
+     */
+    public String commitCheckpoint(String jobId, int iteration)
+            throws IOException, InterruptedException {
+        runGit(5, "add", "-A");
+        String status = runGitOutput(1, "status", "--porcelain");
+        if (!status.isBlank()) {
+            runGit(5, "commit", "-m",
+                    "agent-checkpoint: job " + jobId + " iteration " + (iteration + 1));
+        }
+        String sha = runGitOutput(1, "rev-parse", "HEAD").trim();
+        runGit(5, "push", "-f", "origin",
+                "HEAD:refs/heads/agent/checkpoint/" + jobId);
+        LOG.infof("Checkpointed job %s iteration %d at commit %s", jobId, iteration + 1, sha);
+        return sha;
+    }
+
+    /**
+     * Variant of {@link #commitCheckpoint(String, int)} for multi-repo workspaces where the
+     * agent operates inside a subdirectory identified by {@code repoSlug}.
+     */
+    public String commitCheckpoint(String repoSlug, String jobId, int iteration)
+            throws IOException, InterruptedException {
+        if (repoSlug == null || repoSlug.isBlank()) {
+            return commitCheckpoint(jobId, iteration);
+        }
+        Path repoDir = requireSubdir(repoSlug);
+        runGitInDir(repoDir, 5, "add", "-A");
+        String status = runGitOutputInDir(repoDir, 1, "status", "--porcelain");
+        if (!status.isBlank()) {
+            runGitInDir(repoDir, 5, "commit", "-m",
+                    "agent-checkpoint: job " + jobId + " iteration " + (iteration + 1));
+        }
+        String sha = runGitOutputInDir(repoDir, 1, "rev-parse", "HEAD").trim();
+        runGitInDir(repoDir, 5, "push", "-f", "origin",
+                "HEAD:refs/heads/agent/checkpoint/" + jobId);
+        LOG.infof("Checkpointed job %s (repo %s) iteration %d at commit %s",
+                jobId, repoSlug, iteration + 1, sha);
+        return sha;
+    }
+
+    /**
+     * Checks out a specific commit SHA in detached-HEAD mode so the agent can continue
+     * working from a previously checkpointed state.
+     *
+     * @param sha the commit SHA to check out
+     * @throws IOException          if the git command fails
+     * @throws InterruptedException if the thread is interrupted
+     */
+    public void checkoutCommit(String sha) throws IOException, InterruptedException {
+        runGit(2, "checkout", sha);
+        LOG.infof("Checked out checkpoint commit %s (detached HEAD)", sha);
+    }
+
+    /**
+     * Variant of {@link #checkoutCommit(String)} for multi-repo workspaces.
+     */
+    public void checkoutCommit(String repoSlug, String sha) throws IOException, InterruptedException {
+        if (repoSlug == null || repoSlug.isBlank()) {
+            checkoutCommit(sha);
+            return;
+        }
+        Path repoDir = requireSubdir(repoSlug);
+        runGitInDir(repoDir, 2, "checkout", sha);
+        LOG.infof("Checked out checkpoint commit %s in repo %s (detached HEAD)", sha, repoSlug);
+    }
+
+    /**
+     * Deletes the remote checkpoint branch for the given job, if it exists.
+     * Called on terminal state cleanup.
+     */
+    public void deleteCheckpointBranch(String jobId) {
+        try {
+            runGit(5, "push", "origin", "--delete",
+                    "refs/heads/agent/checkpoint/" + jobId);
+            LOG.infof("Deleted remote checkpoint branch for job %s", jobId);
+        } catch (Exception e) {
+            LOG.warnf("Could not delete checkpoint branch for job %s (non-fatal): %s",
+                    jobId, e.getMessage());
+        }
+    }
+
+    /**
+     * Cherry-pick a list of commit SHAs onto the current branch in order.
+     * Uses {@code --allow-empty} so identical fixup commits do not abort the promotion.
+     *
+     * @throws IOException if cherry-pick fails (conflict or other error)
+     */
+    public void cherryPick(java.util.List<String> commitShas, long timeoutMinutes)
+            throws IOException, InterruptedException {
+        for (String sha : commitShas) {
+            runGit(timeoutMinutes, "cherry-pick", "--allow-empty", sha);
+            LOG.infof("Cherry-picked %s onto current branch", sha);
+        }
+    }
+
+    /**
+     * Pull with rebase to incorporate remote changes before pushing.
+     * Used when committing directly to a shared branch to avoid push rejections.
+     */
+    public void pullRebase(String branchName, long timeoutMinutes) throws IOException, InterruptedException {
+        runGit(timeoutMinutes, "pull", "--rebase", "origin", branchName);
+    }
+
+    /**
+     * Fetch a remote branch so it is available as origin/{branch} for diff operations.
+     */
+    public void fetchBranch(String branchName, long timeoutMinutes) throws IOException, InterruptedException {
+        runGit(timeoutMinutes, "fetch", "origin", branchName);
+        LOG.infof("Fetched origin/%s", branchName);
+    }
+
+    /**
+     * Get the full unified diff between the current HEAD and the merge base with the target branch.
+     * Equivalent to {@code git diff origin/<targetBranch>...HEAD}.
+     */
+    public String getDiff(String targetBranch) throws IOException, InterruptedException {
+        return runGitOutput(2, "diff", "origin/" + targetBranch + "...HEAD");
+    }
+
+    /**
+     * Get the unified diff between a specific commit and the current HEAD.
+     * Used for incremental reviews where we only want changes since the last reviewed commit.
+     */
+    public String getDiffFromCommit(String commitSha) throws IOException, InterruptedException {
+        return runGitOutput(2, "diff", commitSha + "...HEAD");
+    }
+
+    /**
+     * Get the full unified diff of all uncommitted changes in the working tree.
+     * Stages everything first (git add -A) then returns the staged diff.
+     * Used by the self-review step to show the agent what it has changed before committing.
+     */
+    public String getWorkingDiff() throws IOException, InterruptedException {
+        runGit(1, "add", "-A");
+        return runGitOutput(2, "diff", "--cached");
+    }
+
+    /**
+     * Get the full SHA of the current HEAD commit.
+     */
+    public String getHeadSha() throws IOException, InterruptedException {
+        return runGitOutput(1, "rev-parse", "HEAD").trim();
+    }
+
+    /**
+     * Returns true if there are any commits reachable from HEAD that are not reachable
+     * from {@code sinceRef}. Use the SHA captured before the agent loop to detect
+     * whether the agent committed anything.
+     */
+    public boolean hasCommitsSince(String sinceRef) throws IOException, InterruptedException {
+        String output = runGitOutput(1, "log", sinceRef + "..HEAD", "--oneline");
+        return !output.isBlank();
+    }
+
+    /**
+     * Stages all changes and returns the unified diff of everything staged.
+     * Returns an empty string if the working tree is clean.
+     */
+    public String stageAndGetDiff() throws IOException, InterruptedException {
+        runGit(1, "add", "-A");
+        return runGitOutput(2, "diff", "--cached");
+    }
+
+    /**
+     * Check whether a given object (commit SHA) exists in the repository.
+     */
+    public boolean objectExists(String sha) {
+        try {
+            runGit(1, "cat-file", "-t", sha);
+            return true;
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    public String diffStat() throws IOException, InterruptedException {
+        return runGitOutput(2, "diff", "--stat", "HEAD~1");
+    }
+
+    public int countFilesChanged() throws IOException, InterruptedException {
+        String output = runGitOutput(2, "diff", "--name-only", "HEAD~1");
+        return (int) output.lines().filter(l -> !l.isBlank()).count();
+    }
+
+    /**
+     * Returns the relative paths of files changed in the most recent commit,
+     * suitable for scoping linter reports to only agent-touched files.
+     */
+    public java.util.Set<String> getChangedFileNames() throws IOException, InterruptedException {
+        String output = runGitOutput(2, "diff", "--name-only", "HEAD~1");
+        return output.lines()
+                .map(String::trim)
+                .filter(l -> !l.isBlank())
+                .collect(java.util.stream.Collectors.toUnmodifiableSet());
+    }
+
+    public int countLinesChanged() throws IOException, InterruptedException {
+        String output = runGitOutput(2, "diff", "--shortstat", "HEAD~1");
+        int total = 0;
+        for (String part : output.split(",")) {
+            String trimmed = part.trim();
+            if (trimmed.contains("insertion") || trimmed.contains("deletion")) {
+                String[] tokens = trimmed.split("\\s+");
+                if (tokens.length > 0) {
+                    try {
+                        total += Integer.parseInt(tokens[0]);
+                    } catch (NumberFormatException ignored) { }
+                }
+            }
+        }
+        return total;
+    }
+
+    // ─── Subdir-scoped git operations (for multi-repo workspaces) ───────────────
+
+    /**
+     * Stage and commit all changes inside a cloned subdirectory repo.
+     * Only touches the git repository rooted at {@code clonedRepos.get(repoSlug)}.
+     * Returns true if a commit was made, false if the working tree was clean.
+     *
+     * @throws IllegalArgumentException if {@code repoSlug} has not been cloned
+     */
+    public boolean commitSubdir(String repoSlug, String message) throws IOException, InterruptedException {
+        Path repoDir = requireSubdir(repoSlug);
+        runGitInDir(repoDir, 5, "add", "-A");
+        String status = runGitOutputInDir(repoDir, 1, "status", "--porcelain");
+        if (status.isBlank()) {
+            LOG.infof("commitSubdir(%s): nothing to commit — working tree clean", repoSlug);
+            return false;
+        }
+        runGitInDir(repoDir, 5, "commit", "-m", message);
+        LOG.infof("commitSubdir(%s): committed changes", repoSlug);
+        return true;
+    }
+
+    /**
+     * Push a branch in a cloned subdirectory repo.
+     * Only touches the git repository rooted at {@code clonedRepos.get(repoSlug)}.
+     *
+     * @throws IllegalArgumentException if {@code repoSlug} has not been cloned
+     */
+    public void pushSubdir(String repoSlug, String branchName, long timeoutMinutes)
+            throws IOException, InterruptedException {
+        Path repoDir = requireSubdir(repoSlug);
+        runGitInDir(repoDir, timeoutMinutes, "push", "origin", branchName);
+        LOG.infof("pushSubdir(%s): pushed branch %s", repoSlug, branchName);
+    }
+
+    /**
+     * Count files changed in the most recent commit of a cloned subdirectory repo.
+     *
+     * @throws IllegalArgumentException if {@code repoSlug} has not been cloned
+     */
+    public int countFilesChangedInSubdir(String repoSlug) throws IOException, InterruptedException {
+        Path repoDir = requireSubdir(repoSlug);
+        String output = runGitOutputInDir(repoDir, 2, "diff", "--name-only", "HEAD~1");
+        return (int) output.lines().filter(l -> !l.isBlank()).count();
+    }
+
+    /**
+     * Count lines changed (insertions + deletions) in the most recent commit of a cloned subdirectory repo.
+     *
+     * @throws IllegalArgumentException if {@code repoSlug} has not been cloned
+     */
+    public int countLinesChangedInSubdir(String repoSlug) throws IOException, InterruptedException {
+        Path repoDir = requireSubdir(repoSlug);
+        String output = runGitOutputInDir(repoDir, 2, "diff", "--shortstat", "HEAD~1");
+        int total = 0;
+        for (String part : output.split(",")) {
+            String trimmed = part.trim();
+            if (trimmed.contains("insertion") || trimmed.contains("deletion")) {
+                String[] tokens = trimmed.split("\\s+");
+                if (tokens.length > 0) {
+                    try {
+                        total += Integer.parseInt(tokens[0]);
+                    } catch (NumberFormatException ignored) { }
+                }
+            }
+        }
+        return total;
+    }
+
+    private Path requireSubdir(String repoSlug) {
+        Path repoDir = clonedRepos.get(repoSlug);
+        if (repoDir == null) {
+            throw new IllegalArgumentException("Repository slug not cloned in this workspace: " + repoSlug);
+        }
+        return repoDir;
+    }
+
+    private void runGitInDir(Path dir, long timeoutMinutes, String... args)
+            throws IOException, InterruptedException {
+        String[] cmd = new String[args.length + 1];
+        cmd[0] = "git";
+        System.arraycopy(args, 0, cmd, 1, args.length);
+
+        ProcessBuilder pb = new ProcessBuilder(cmd)
+                .directory(dir.toFile())
+                .redirectErrorStream(true);
+        Process proc = pb.start();
+        String output = new String(proc.getInputStream().readAllBytes());
+        boolean finished = proc.waitFor(timeoutMinutes, TimeUnit.MINUTES);
+        if (!finished) {
+            proc.destroyForcibly();
+            throw new IOException("Git command timed out: " + String.join(" ", cmd));
+        }
+        if (proc.exitValue() != 0) {
+            throw new IOException("Git command failed (exit " + proc.exitValue() + "): " + output);
+        }
+    }
+
+    private String runGitOutputInDir(Path dir, long timeoutMinutes, String... args)
+            throws IOException, InterruptedException {
+        String[] cmd = new String[args.length + 1];
+        cmd[0] = "git";
+        System.arraycopy(args, 0, cmd, 1, args.length);
+
+        ProcessBuilder pb = new ProcessBuilder(cmd)
+                .directory(dir.toFile())
+                .redirectErrorStream(true);
+        Process proc = pb.start();
+        String output = new String(proc.getInputStream().readAllBytes());
+        boolean finished = proc.waitFor(timeoutMinutes, TimeUnit.MINUTES);
+        if (!finished) {
+            proc.destroyForcibly();
+            throw new IOException("Git command timed out: " + String.join(" ", cmd));
+        }
+        if (proc.exitValue() != 0) {
+            throw new IOException("Git command failed (exit " + proc.exitValue() + "): " + output);
+        }
+        return output;
+    }
+
+    /**
+     * Records the current last-modified time for {@code absolutePath}.
+     * Called by {@code ReadFileTool} after each successful file read so that
+     * {@code EditFileTool} can detect concurrent modifications (staleness check).
+     */
+    public void recordFileRead(Path absolutePath) {
+        try {
+            FileTime mtime = Files.getLastModifiedTime(absolutePath);
+            fileReadTimestamps.put(absolutePath.toString(), mtime);
+        } catch (IOException ignored) {
+            // Non-fatal: if we can't stat the file the staleness check will simply
+            // treat it as unread, causing EditFileTool to ask for a re-read.
+        }
+    }
+
+    /**
+     * Returns the {@link FileTime} recorded when this file was last read via
+     * {@code read_file}, or {@code null} if it has never been read in this workspace session.
+     */
+    public FileTime getFileReadTime(Path absolutePath) {
+        return fileReadTimestamps.get(absolutePath.toString());
+    }
+
+    /**
+     * Resolve a relative path and verify it stays within the workspace root.
+     * Throws SecurityException on traversal attempt.
+     */
+    public Path resolve(String relativePath) {
+        Path resolved = root.resolve(relativePath).normalize();
+        if (!resolved.startsWith(root)) {
+            throw new SecurityException("Path traversal blocked: " + relativePath);
+        }
+        return resolved;
+    }
+
+    /**
+     * Marks this workspace to be preserved on disk when {@link #close()} is called.
+     * Use this before failing a job so a subsequent retry job can reuse the
+     * already-cloned repository via {@link #reuse(String)}.
+     */
+    public void keepOnClose() {
+        this.keepOnClose = true;
+    }
+
+    /** Returns the absolute path of the workspace root directory. */
+    public String getAbsolutePath() {
+        return root.toAbsolutePath().toString();
+    }
+
+    @Override
+    public void close() {
+        if (planManaged || keepOnClose) {
+            return;
+        }
+        doClose();
+    }
+
+    /**
+     * Unconditionally deletes the workspace directory regardless of whether it is
+     * plan-managed. Called by {@code PlanWorkspaceManager} when the plan completes or fails.
+     */
+    public void forceClose() {
+        doClose();
+    }
+
+    private void doClose() {
+        try {
+            if (Files.exists(root)) {
+                try (Stream<Path> walk = Files.walk(root)) {
+                    walk.sorted(Comparator.reverseOrder()).forEach(p -> {
+                        try { Files.deleteIfExists(p); } catch (IOException ignored) { }
+                    });
+                }
+                LOG.infof("Cleaned up workspace: %s", root);
+            }
+        } catch (IOException e) {
+            LOG.warnf("Failed to clean up workspace %s: %s", root, e.getMessage());
+        }
+    }
+
+    private void runGit(long timeoutMinutes, String... args) throws IOException, InterruptedException {
+        String[] cmd = new String[args.length + 1];
+        cmd[0] = "git";
+        System.arraycopy(args, 0, cmd, 1, args.length);
+
+        ProcessBuilder pb = new ProcessBuilder(cmd)
+                .directory(root.toFile())
+                .redirectErrorStream(true);
+        Process proc = pb.start();
+        // Read stdout+stderr fully BEFORE waitFor to prevent a pipe-buffer deadlock:
+        // if the child writes more than the OS pipe buffer it blocks on write while
+        // the parent blocks in waitFor — draining first avoids the deadlock.
+        String output = new String(proc.getInputStream().readAllBytes());
+        boolean finished = proc.waitFor(timeoutMinutes, TimeUnit.MINUTES);
+        if (!finished) {
+            proc.destroyForcibly();
+            throw new IOException("Git command timed out: " + String.join(" ", cmd));
+        }
+        if (proc.exitValue() != 0) {
+            throw new IOException("Git command failed (exit " + proc.exitValue() + "): " + output);
+        }
+    }
+
+    private String runGitOutput(long timeoutMinutes, String... args) throws IOException, InterruptedException {
+        String[] cmd = new String[args.length + 1];
+        cmd[0] = "git";
+        System.arraycopy(args, 0, cmd, 1, args.length);
+
+        ProcessBuilder pb = new ProcessBuilder(cmd)
+                .directory(root.toFile())
+                .redirectErrorStream(true);
+        Process proc = pb.start();
+        String output = new String(proc.getInputStream().readAllBytes());
+        boolean finished = proc.waitFor(timeoutMinutes, TimeUnit.MINUTES);
+        if (!finished) {
+            proc.destroyForcibly();
+            throw new IOException("Git command timed out: " + String.join(" ", cmd));
+        }
+        if (proc.exitValue() != 0) {
+            throw new IOException("Git command failed (exit " + proc.exitValue() + "): " + output);
+        }
+        return output;
+    }
+}

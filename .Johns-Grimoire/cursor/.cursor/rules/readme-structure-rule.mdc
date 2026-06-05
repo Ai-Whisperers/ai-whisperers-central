@@ -1,0 +1,74 @@
+---
+id: rule.documentation.readme-structure.v1
+kind: rule
+version: 1.0.0
+description: Defines the standard structure for README files
+globs: "**/README.md"
+governs: "**/README.md"
+implements: documentation.readme
+requires: []
+model_hints: { temp: 0.2, top_p: 0.9 }
+provenance: { owner: team-documentation, last_review: 2025-12-06 }
+alwaysApply: false
+---
+
+# README Structure Rule
+
+## Purpose & Scope
+
+This rule defines the standard structure for README.md files to ensure consistency and completeness across projects.
+
+**Applies to**: Root `README.md` and module-level `README.md`.
+
+## Inputs (Contract)
+
+- Project/Module Name
+- Description
+- Setup/Usage instructions
+
+## Outputs (Contract)
+
+- Well-structured `README.md`
+
+## Deterministic Steps
+
+1. Create/Update `README.md`.
+2. Ensure required sections exist:
+   - Title
+   - Description
+   - Installation/Setup
+   - Usage
+   - Contribution
+3. Use clear markdown formatting.
+
+## Formatting Requirements
+
+- Top-level H1 for Title
+- H2 for main sections
+- Badges (optional) at top
+
+## OPSEC and Leak Control
+
+- No internal secrets in README.
+
+## Integration Points
+
+None.
+
+## Failure Modes and Recovery
+
+N/A
+
+## Provenance Footer Specification
+
+N/A
+
+## Related Rules
+
+- `rule.authoring.file-structure.v1`
+
+## FINAL MUST-PASS CHECKLIST
+
+- [ ] Title and Description present
+- [ ] Installation/Usage instructions present
+- [ ] Consistent markdown structure

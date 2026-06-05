@@ -1,0 +1,26 @@
+name: Sync Workflows to Client Repos
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/**'
+  workflow_dispatch:
+
+jobs:
+  sync:
+    name: Sync workflows
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Sync to client repos
+        run: node scripts/sync-workflows.js
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

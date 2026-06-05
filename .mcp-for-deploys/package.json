@@ -1,0 +1,66 @@
+{
+  "name": "launch-mcp",
+  "version": "0.1.0",
+  "description": "MCP server for intelligent deployment assistance - analyze, recommend, and deploy applications",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "bin": {
+    "launch": "./dist/cli/index.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "start": "node dist/index.js",
+    "serve": "node dist/cli/index.js serve",
+    "cli": "node dist/cli/index.js",
+    "test": "vitest",
+    "test:run": "vitest run",
+    "lint": "eslint src --ext .ts",
+    "lint:fix": "eslint src --ext .ts --fix",
+    "format": "prettier --write \"src/**/*.ts\"",
+    "clean": "rimraf dist",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "mcp",
+    "deployment",
+    "docker",
+    "vercel",
+    "railway",
+    "render",
+    "cloudflare",
+    "claude",
+    "ai",
+    "devops"
+  ],
+  "author": "AI Whisperers",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Ai-Whisperers/mcp-for-deploys.git"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0",
+    "chalk": "^5.3.0",
+    "commander": "^12.1.0",
+    "dockerode": "^4.0.2",
+    "execa": "^9.5.1",
+    "ora": "^8.1.1",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/dockerode": "^3.3.31",
+    "@types/node": "^22.10.2",
+    "@typescript-eslint/eslint-plugin": "^8.18.0",
+    "@typescript-eslint/parser": "^8.18.0",
+    "eslint": "^9.16.0",
+    "prettier": "^3.4.2",
+    "rimraf": "^6.0.1",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
+  }
+}

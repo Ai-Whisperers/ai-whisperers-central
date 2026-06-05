@@ -1,0 +1,30 @@
+package com.eneve.agent.agent.model;
+
+import java.time.Instant;
+import java.util.List;
+import java.util.Map;
+
+/**
+ * A configurable automation hook stored in the {@code automation_hooks} table.
+ * Defines what action to run, when to trigger it, and which branches it applies to.
+ */
+public record AutomationHook(
+        Long id,
+        String name,
+        String description,
+        boolean enabled,
+        List<String> triggerTypes,
+        String prEvent,
+        String branchPattern,
+        String cronExpr,
+        String actionType,
+        String prompt,
+        List<String> ruleNames,
+        String extraRules,
+        String targetBranch,
+        boolean commitDirect,
+        String repoUrl,
+        Map<String, String> triggerFilter,
+        Instant createdAt,
+        Instant updatedAt
+) {}

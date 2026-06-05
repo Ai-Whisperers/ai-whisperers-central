@@ -1,0 +1,312 @@
+package com.eneve.agent.agent;
+
+import java.time.Instant;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+
+import com.eneve.agent.agent.ArchetypeDetector;
+import com.eneve.agent.agent.ArchetypeDetector.ArchetypeInfo;
+import com.eneve.agent.agent.model.QualityReport;
+import com.eneve.agent.agent.model.QualityReport.*;
+import java.util.stream.Collectors;
+import com.eneve.agent.agent.CodeMetricsCalculator.CodeMetricsSnapshot;
+import com.eneve.agent.agent.CoverageReporter.CoverageSnapshot;
+import com.eneve.agent.agent.store.CommentFeedbackStore;
+import com.eneve.agent.agent.store.CommentStore;
+import com.eneve.agent.aikido.AikidoIssueInfo;
+import com.eneve.agent.aikido.AikidoService;
+import com.eneve.agent.SecurityIssuesCacheService;
+import com.eneve.agent.linter.LinterFinding;
+import com.eneve.agent.linter.LinterResult;
+import com.eneve.agent.linter.LinterService;
+import com.eneve.agent.workspace.WorkspaceContext;
+
+import com.eneve.agent.settings.SettingsService;
+import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.inject.Inject;
+import org.jboss.logging.Logger;
+
+/**
+ * Collects all quality metrics for a repository branch and assembles them into a
+ * {@link QualityReport} with an aggregate score.
+ *
+ * <p>Coverage and linter measurements require a cloned workspace (passed in).
+ * Aikido data is fetched from the API. Complexity is computed via JavaParser.
+ * Review quality is read from the local database.
+ */
+@ApplicationScoped
+public class QualityReportCollector {
+
+    private static final Logger LOG = Logger.getLogger(QualityReportCollector.class);
+
+    @Inject ArchetypeDetector archetypeDetector;
+    @Inject TestPresenceChecker testPresenceChecker;
+    @Inject LinterService linterService;
+    @Inject AikidoService aikidoService;
+    @Inject SecurityIssuesCacheService securityIssuesCacheService;
+    @Inject CodeMetricsCalculator metricsCalculator;
+    @Inject CommentStore commentStore;
+    @Inject CommentFeedbackStore feedbackStore;
+    @Inject CoverageReporter coverageReporter;
+    @Inject DotnetCoverageReporter dotnetCoverageReporter;
+    @Inject JsCoverageReporter jsCoverageReporter;
+    @Inject SettingsService settingsService;
+
+    /**
+     * Collects all available quality metrics for the given workspace and returns a complete
+     * {@link QualityReport}. All sections are attempted independently — a failure in one
+     * does not prevent the others from completing.
+     *
+     * @param workspace    the cloned workspace context (already checked-out on the target branch)
+     * @param workspaceName the logical workspace / organisation name
+     * @param repoSlug     the repository slug
+     * @param branch       the branch being measured
+     */
+    public QualityReport collect(WorkspaceContext workspace, String workspaceName, String repoSlug, String branch) {
+        LOG.infof("QualityReportCollector: collecting metrics for %s/%s branch=%s", workspaceName, repoSlug, branch);
+
+        int defaultCcThreshold = Integer.parseInt(settingsService.get("quality-report.cc-threshold", "10"));
+        long coverageTimeoutMinutes = Long.parseLong(settingsService.get("quality-report.job-timeout-minutes", "30"));
+        boolean coverageEnabled = Boolean.parseBoolean(settingsService.get("quality-report.coverage.enabled", "true"));
+
+        long startMs = System.currentTimeMillis();
+
+        // All 6 sections are independent — run them in parallel on virtual threads.
+        // Each collectX method handles its own exceptions and returns null on failure,
+        // so futures never complete exceptionally.
+        try (ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor()) {
+
+            CompletableFuture<TestPresenceSection> testPresenceFuture = CompletableFuture.supplyAsync(
+                    () -> collectTestPresence(workspace, workspaceName, repoSlug), executor);
+            CompletableFuture<LinterSection> linterFuture = CompletableFuture.supplyAsync(
+                    () -> collectLinter(workspace, workspaceName, repoSlug), executor);
+            CompletableFuture<AikidoSection> aikidoFuture = CompletableFuture.supplyAsync(
+                    () -> collectAikido(repoSlug), executor);
+            CompletableFuture<ComplexitySection> complexityFuture = CompletableFuture.supplyAsync(
+                    () -> collectComplexity(workspace, workspaceName, repoSlug, branch, defaultCcThreshold), executor);
+            CompletableFuture<ReviewSection> reviewFuture = CompletableFuture.supplyAsync(
+                    () -> collectReview(workspaceName, repoSlug), executor);
+            CompletableFuture<CoverageSection> coverageFuture = CompletableFuture.supplyAsync(
+                    () -> collectCoverage(workspace, workspaceName, repoSlug, coverageEnabled, coverageTimeoutMinutes), executor);
+
+            CompletableFuture.allOf(
+                    testPresenceFuture, linterFuture, aikidoFuture,
+                    complexityFuture, reviewFuture, coverageFuture
+            ).join();
+
+            TestPresenceSection testPresenceSection = testPresenceFuture.join();
+            LinterSection linterSection = linterFuture.join();
+            AikidoSection aikidoSection = aikidoFuture.join();
+            ComplexitySection complexitySection = complexityFuture.join();
+            ReviewSection reviewSection = reviewFuture.join();
+            CoverageSection coverageSection = coverageFuture.join();
+
+            LOG.infof("QualityReportCollector: all sections collected in %d ms for %s/%s",
+                    System.currentTimeMillis() - startMs, workspaceName, repoSlug);
+
+            double score = QualityReport.computeScore(coverageSection, testPresenceSection, linterSection,
+                    aikidoSection, complexitySection, reviewSection);
+
+            String detectedArchetype = null;
+            String detectedArchetypeVersion = null;
+            try {
+                ArchetypeInfo archetypeInfo = archetypeDetector.detect(workspace.getRoot());
+                if (archetypeInfo != null) {
+                    detectedArchetype = archetypeInfo.archetype();
+                    detectedArchetypeVersion = archetypeInfo.version();
+                }
+            } catch (Exception e) {
+                LOG.warnf("QualityReportCollector: archetype detection failed for %s/%s: %s",
+                        workspaceName, repoSlug, e.getMessage());
+            }
+
+            return new QualityReport(
+                    UUID.randomUUID().toString(),
+                    workspaceName,
+                    repoSlug,
+                    branch,
+                    Instant.now(),
+                    score,
+                    coverageSection,
+                    linterSection,
+                    aikidoSection,
+                    complexitySection,
+                    reviewSection,
+                    testPresenceSection,
+                    detectedArchetype,
+                    detectedArchetypeVersion
+            );
+        }
+    }
+
+    // ─── Individual collectors ────────────────────────────────────────────
+
+    private TestPresenceSection collectTestPresence(WorkspaceContext workspace, String workspaceName, String repoSlug) {
+        try {
+            return testPresenceChecker.check(workspace.getRoot(), workspaceName, repoSlug);
+        } catch (Exception e) {
+            LOG.warnf("QualityReportCollector: test presence check failed for %s/%s: %s",
+                    workspaceName, repoSlug, e.getMessage());
+            return null;
+        }
+    }
+
+    private LinterSection collectLinter(WorkspaceContext workspace, String workspaceName, String repoSlug) {
+        try {
+            List<LinterResult> results = linterService.runAll(workspace.getRoot());
+            if (results.isEmpty()) {
+                LOG.infof("QualityReportCollector: no linters applicable for %s/%s — skipping", workspaceName, repoSlug);
+                return null;
+            }
+
+            int totalFindings = 0, errorCount = 0, warningCount = 0, infoCount = 0;
+            Map<String, Integer> byLinter = new HashMap<>();
+            Map<String, Integer> bySeverity = new HashMap<>();
+
+            for (LinterResult r : results) {
+                int count = r.findings().size();
+                totalFindings += count;
+                byLinter.merge(r.linterName(), count, Integer::sum);
+
+                for (LinterFinding f : r.findings()) {
+                    bySeverity.merge(f.severity(), 1, Integer::sum);
+                    switch (f.severity()) {
+                        case LinterFinding.SEVERITY_ERROR -> errorCount++;
+                        case LinterFinding.SEVERITY_WARNING -> warningCount++;
+                        case LinterFinding.SEVERITY_INFO -> infoCount++;
+                    }
+                }
+            }
+
+            return new LinterSection(totalFindings, errorCount, warningCount, infoCount, byLinter, bySeverity);
+        } catch (Exception e) {
+            LOG.warnf("QualityReportCollector: linter collection failed for %s/%s: %s",
+                    workspaceName, repoSlug, e.getMessage());
+            return null;
+        }
+    }
+
+    private AikidoSection collectAikido(String repoSlug) {
+        try {
+            if (!aikidoService.isEnabled()) {
+                LOG.debugf("QualityReportCollector: Aikido not configured — skipping security section");
+                return null;
+            }
+            // Prefer the in-memory cache to avoid direct API calls and rate limiting.
+            List<AikidoIssueInfo> issues = securityIssuesCacheService.getIssuesForRepo(repoSlug, false);
+            if (issues == null) return null;
+
+            int critical = 0, high = 0, medium = 0, low = 0;
+            int sast = 0, dependency = 0, secret = 0, container = 0, other = 0;
+            for (AikidoIssueInfo issue : issues) {
+                if (issue.severity() != null) {
+                    switch (issue.severity().toLowerCase()) {
+                        case "critical" -> critical++;
+                        case "high" -> high++;
+                        case "medium" -> medium++;
+                        case "low" -> low++;
+                    }
+                }
+                String t = issue.issueType() == null ? "unknown" : issue.issueType().toLowerCase();
+                switch (t) {
+                    case "sast", "code", "static_analysis", "code_security" -> sast++;
+                    case "sca", "dependency", "dependencies", "open_source",
+                         "software_composition_analysis" -> dependency++;
+                    case "secret", "secrets", "exposed_secret", "hardcoded_secret" -> secret++;
+                    case "container", "container_image", "docker", "image" -> container++;
+                    default -> other++;
+                }
+            }
+            return new AikidoSection(issues.size(), critical, high, medium, low,
+                    sast, dependency, secret, container, other);
+        } catch (Exception e) {
+            LOG.warnf("QualityReportCollector: Aikido collection failed for %s: %s", repoSlug, e.getMessage());
+            return null;
+        }
+    }
+
+    private ComplexitySection collectComplexity(WorkspaceContext workspace, String workspaceName,
+                                                String repoSlug, String branch, int defaultCcThreshold) {
+        try {
+            CodeMetricsSnapshot snap = metricsCalculator.calculate(
+                    workspace.getRoot(), workspaceName, repoSlug, branch, defaultCcThreshold);
+            if (snap == null) return null;
+            return new ComplexitySection(
+                    snap.totalMethods(),
+                    snap.methodsAboveThreshold(),
+                    snap.avgComplexity(),
+                    snap.maxComplexity(),
+                    snap.threshold()
+            );
+        } catch (Exception e) {
+            LOG.warnf("QualityReportCollector: complexity collection failed for %s/%s: %s",
+                    workspaceName, repoSlug, e.getMessage());
+            return null;
+        }
+    }
+
+    private CoverageSection collectCoverage(WorkspaceContext workspace, String workspaceName, String repoSlug,
+                                             boolean coverageEnabled, long coverageTimeoutMinutes) {
+        if (!coverageEnabled) {
+            LOG.debugf("QualityReportCollector: coverage collection disabled — skipping");
+            return null;
+        }
+        try {
+            // Fallback chain: Maven/JaCoCo → .NET/Coverlet → JS/TS (Jest/Vitest)
+            CoverageSnapshot snap = coverageReporter.measureCoverageWithFallback(workspace, coverageTimeoutMinutes);
+            if (snap == null && dotnetCoverageReporter.isApplicable(workspace)) {
+                LOG.infof("QualityReportCollector: no Maven coverage for %s/%s — trying .NET coverage",
+                        workspaceName, repoSlug);
+                snap = dotnetCoverageReporter.measureCoverage(workspace, coverageTimeoutMinutes);
+            }
+            if (snap == null && jsCoverageReporter.isApplicable(workspace)) {
+                LOG.infof("QualityReportCollector: no Maven/.NET coverage for %s/%s — trying JS/TS coverage",
+                        workspaceName, repoSlug);
+                snap = jsCoverageReporter.measureCoverage(workspace, coverageTimeoutMinutes);
+            }
+            if (snap == null) return null;
+            List<PackageLineCoverage> packages = snap.packages() == null ? List.of()
+                    : snap.packages().stream()
+                            .map(p -> new PackageLineCoverage(p.name(), p.linesCovered(), p.linesMissed()))
+                            .collect(Collectors.toList());
+            return new CoverageSection(
+                    snap.lineRate(), snap.branchRate(), snap.methodRate(), snap.classRate(),
+                    snap.linesCovered(), snap.linesMissed(),
+                    snap.branchesCovered(), snap.branchesMissed(),
+                    snap.methodsCovered(), snap.methodsMissed(),
+                    snap.classesCovered(), snap.classesMissed(),
+                    packages
+            );
+        } catch (Exception e) {
+            LOG.warnf("QualityReportCollector: coverage collection failed for %s/%s: %s",
+                    workspaceName, repoSlug, e.getMessage());
+            return null;
+        }
+    }
+
+    private ReviewSection collectReview(String workspace, String repoSlug) {
+        try {
+            long totalFindings = commentStore.countTotalFindings(workspace, repoSlug);
+            long resolvedFindings = commentStore.countResolvedFindings(workspace, repoSlug);
+            long falsePositives = feedbackStore.countFalsePositives(workspace, repoSlug);
+
+            double fpRate = totalFindings > 0
+                    ? Math.round((double) falsePositives / totalFindings * 10000.0) / 10000.0
+                    : 0.0;
+            double resolutionRate = totalFindings > 0
+                    ? Math.round((double) resolvedFindings / totalFindings * 10000.0) / 10000.0
+                    : 0.0;
+
+            return new ReviewSection(totalFindings, resolvedFindings, resolutionRate, falsePositives, fpRate);
+        } catch (Exception e) {
+            LOG.warnf("QualityReportCollector: review quality collection failed for %s/%s: %s",
+                    workspace, repoSlug, e.getMessage());
+            return null;
+        }
+    }
+}

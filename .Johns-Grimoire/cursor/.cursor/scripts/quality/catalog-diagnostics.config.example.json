@@ -1,0 +1,12 @@
+{
+  "RunId": "run1",
+  "OutputRoot": "",
+  "SummaryOnly": false,
+  "CreateTicketFolders": true,
+  "TicketRoot": "tickets/EPP-192/EPP-192-CODEQUALITY",
+  "TicketPrefix": "EPP-192-CODEQUALITY",
+  "OverwriteExisting": false,
+  "JsonSummaryPath": ""
+}
+
+

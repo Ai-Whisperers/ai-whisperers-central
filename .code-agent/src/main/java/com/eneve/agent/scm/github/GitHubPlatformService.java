@@ -1,0 +1,832 @@
+package com.eneve.agent.scm.github;
+
+import com.eneve.agent.model.OpenPrEntry;
+import com.eneve.agent.model.PrCommitEntry;
+import com.eneve.agent.scm.AgentComment;
+import com.eneve.agent.scm.GitPlatformService;
+import com.eneve.agent.scm.ThreadComment;
+import com.eneve.agent.settings.SettingsService;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.enterprise.inject.Typed;
+import jakarta.inject.Inject;
+import org.jboss.logging.Logger;
+
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
+import java.nio.charset.StandardCharsets;
+import java.time.Duration;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.ForkJoinPool;
+
+/**
+ * GitHub REST API v3 implementation of {@link GitPlatformService}.
+ * <p>
+ * Uses Personal Access Token (PAT) or fine-grained token authentication
+ * via the {@code Authorization: Bearer} header.
+ * <p>
+ * Parameter mapping: org = GitHub owner (user or organisation), project = "" (ignored),
+ * repo = repository name.
+ * <p>
+ * Typed to its concrete class so CDI does not expose it as a {@link GitPlatformService}
+ * bean — the {@link com.eneve.agent.scm.GitPlatformProducer} is the single source
+ * for the interface.
+ */
+@ApplicationScoped
+@Typed(GitHubPlatformService.class)
+public class GitHubPlatformService implements GitPlatformService {
+
+    private static final Logger LOG = Logger.getLogger(GitHubPlatformService.class);
+
+    @Inject
+    SettingsService settingsService;
+
+    private String baseUrl() { return settingsService.get("github.base.url", "https://api.github.com"); }
+
+    @Inject HttpClient httpClient;
+    @Inject ObjectMapper objectMapper;
+
+    @Override
+    public String[] createPullRequest(String org, String project, String repo,
+                                      String sourceBranch, String targetBranch,
+                                      String title, String description) {
+        ensureTargetBranchExists(org, repo, targetBranch);
+
+        String url = baseUrl() + "/repos/" + org + "/" + repo + "/pulls";
+        String body = """
+                {
+                  "head": "%s",
+                  "base": "%s",
+                  "title": "%s",
+                  "body": "%s"
+                }
+                """.formatted(
+                escapeJson(sourceBranch),
+                escapeJson(targetBranch),
+                escapeJson(title),
+                escapeJson(description)
+        );
+
+        String responseBody = postAndReturn(url, body, "create PR");
+        try {
+            JsonNode node = objectMapper.readTree(responseBody);
+            String prNumber = String.valueOf(node.path("number").asInt());
+            String prUrl = node.path("html_url").asText("");
+            LOG.infof("Created PR #%s: %s", prNumber, prUrl);
+            return new String[] { prUrl, prNumber };
+        } catch (Exception e) {
+            LOG.errorf("Failed to parse create-PR response: %s", e.getMessage());
+            return new String[] { "", "" };
+        }
+    }
+
+    @Override
+    public void mergePullRequest(String org, String project, String repo, String prId) {
+        String url = baseUrl() + "/repos/" + org + "/" + repo + "/pulls/" + prId + "/merge";
+        putAndReturn(url, "{}", "merge PR #" + prId);
+        LOG.infof("Merged PR #%s in %s/%s", prId, org, repo);
+    }
+
+    @Override
+    public void declinePullRequest(String org, String project, String repo, String prId) {
+        String url = baseUrl() + "/repos/" + org + "/" + repo + "/pulls/" + prId;
+        String body = """
+                { "state": "closed" }
+                """;
+        patchAndReturn(url, body, "close PR #" + prId);
+        LOG.infof("Closed PR #%s in %s/%s", prId, org, repo);
+    }
+
+    @Override
+    public Map<String, String> getPullRequestInfo(String org, String project, String repo, String prId) {
+        String url = baseUrl() + "/repos/" + org + "/" + repo + "/pulls/" + prId;
+        String responseBody = getAndReturn(url, "get PR #" + prId);
+
+        try {
+            JsonNode node = objectMapper.readTree(responseBody);
+            String sourceBranch = node.path("head").path("ref").asText();
+            String destBranch = node.path("base").path("ref").asText();
+            String title = node.path("title").asText();
+            return Map.of(
+                    "sourceBranch", sourceBranch,
+                    "destinationBranch", destBranch,
+                    "title", title
+            );
+        } catch (Exception e) {
+            LOG.errorf("Failed to parse PR info response: %s", e.getMessage());
+            throw new RuntimeException("Failed to parse PR info: " + e.getMessage(), e);
+        }
+    }
+
+    @Override
+    public String getPullRequestDiff(String org, String project, String repo, String prId) {
+        try {
+            String url = baseUrl() + "/repos/" + org + "/" + repo + "/pulls/" + prId;
+            requireTrustedUrl(url);
+            HttpRequest request = HttpRequest.newBuilder()
+                    .timeout(Duration.ofSeconds(30))
+                    .uri(URI.create(url))
+                    .header("Authorization", "Bearer " + token())
+                    .header("Accept", "application/vnd.github.diff")
+                    .header("X-GitHub-Api-Version", "2022-11-28")
+                    .GET()
+                    .build();
+            HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+            if (response.statusCode() >= 200 && response.statusCode() < 300) {
+                return response.body();
+            }
+            LOG.warnf("GitHub get PR diff failed (HTTP %d) for PR #%s", response.statusCode(), prId);
+            return "";
+        } catch (Exception e) {
+            LOG.warnf("GitHub get PR diff error for PR #%s: %s", prId, e.getMessage());
+            return "";
+        }
+    }
+
+    @Override
+    public long addPrComment(String org, String project, String repo, String prId, String commentBody) {
+        String url = baseUrl() + "/repos/" + org + "/" + repo + "/issues/" + prId + "/comments";
+        String body = """
+                { "body": "%s" }
+                """.formatted(escapeJson(commentBody));
+        String responseBody = postAndReturn(url, body, "comment on PR #" + prId);
+        long commentId = parseId(responseBody);
+        LOG.infof("Added review comment %d to PR #%s in %s/%s", commentId, prId, org, repo);
+        return commentId;
+    }
+
+    @Override
+    public void updatePrComment(String org, String project, String repo, String prId,
+                                long commentId, String commentBody) {
+        String safeId = sanitizeId(prId);
+        String url = baseUrl() + "/repos/" + org + "/" + repo + "/issues/comments/" + commentId;
+        String body = """
+                { "body": "%s" }
+                """.formatted(escapeJson(commentBody));
+        patchAndReturn(url, body, "update comment #" + commentId + " on PR #" + safeId);
+        LOG.infof("Updated review comment %d on PR #%s in %s/%s", commentId, prId, org, repo);
+    }
+
+    @Override
+    public long addInlinePrComment(String org, String project, String repo, String prId,
+                                   String filePath, int line, String commentBody) {
+        // Fetch the HEAD commit SHA from the PR to form a valid review comment position
+        String headSha = fetchPrHeadSha(org, repo, prId);
+        if (headSha == null) {
+            LOG.warnf("Could not fetch HEAD SHA for PR #%s — falling back to general comment", prId);
+            return addPrComment(org, project, repo, prId, commentBody);
+        }
+
+        String url = baseUrl() + "/repos/" + org + "/" + repo + "/pulls/" + prId + "/comments";
+        String body = """
+                {
+                  "body": "%s",
+                  "commit_id": "%s",
+                  "path": "%s",
+                  "line": %d,
+                  "side": "RIGHT"
+                }
+                """.formatted(
+                escapeJson(commentBody),
+                escapeJson(headSha),
+                escapeJson(filePath),
+                line
+        );
+
+        try {
+            String responseBody = postAndReturn(url, body,
+                    "inline comment on PR #" + prId + " " + filePath + ":" + line);
+            long commentId = parseId(responseBody);
+            LOG.infof("Added inline comment %d to PR #%s at %s:%d", commentId, prId, filePath, line);
+            return commentId;
+        } catch (Exception e) {
+            LOG.warnf("Inline comment failed for PR #%s at %s:%d (%s) — falling back to general comment",
+                    prId, filePath, line, e.getMessage());
+            return addPrComment(org, project, repo, prId, commentBody);
+        }
+    }
+
+    @Override
+    public long replyToComment(String org, String project, String repo, String prId,
+                               long parentCommentId, String commentBody) {
+        String url = baseUrl() + "/repos/" + org + "/" + repo + "/pulls/" + prId
+                + "/comments/" + parentCommentId + "/replies";
+        String body = """
+                { "body": "%s" }
+                """.formatted(escapeJson(commentBody));
+        String responseBody = postAndReturn(url, body,
+                "reply to comment #" + parentCommentId + " on PR #" + prId);
+        long replyId = parseId(responseBody);
+        LOG.infof("Replied (comment %d) to comment #%d on PR #%s", replyId, parentCommentId, prId);
+        return replyId;
+    }
+
+    @Override
+    public List<ThreadComment> getCommentThread(String org, String project, String repo,
+                                                String prId, long rootCommentId) {
+        List<ThreadComment> result = new ArrayList<>();
+
+        String url = baseUrl() + "/repos/" + org + "/" + repo
+                + "/pulls/" + prId + "/comments?per_page=100";
+
+        while (url != null) {
+            HttpResponse<String> response = getWithResponse(url, "get review comments for PR #" + prId);
+            try {
+                JsonNode comments = objectMapper.readTree(response.body());
+                if (comments.isArray()) {
+                    for (JsonNode comment : comments) {
+                        long id = comment.path("id").asLong(0);
+                        long inReplyTo = comment.path("in_reply_to_id").asLong(0);
+
+                        // Include root comment and direct/indirect replies
+                        if (id == rootCommentId || inReplyTo == rootCommentId) {
+                            String author = comment.path("user").path("login").asText("unknown");
+                            String content = comment.path("body").asText("").trim();
+                            String createdAt = comment.path("created_at").asText("");
+                            // Use the actual in_reply_to_id so callers see the real parent chain,
+                            // not a flattened view where every reply points to the root.
+                            long parentId = (id == rootCommentId) ? 0L : inReplyTo;
+                            boolean isAgent = !agentUser().isEmpty() && author.equalsIgnoreCase(agentUser());
+                            result.add(new ThreadComment(id, parentId, author, content, createdAt, isAgent));
+                        }
+                    }
+                }
+                url = nextPageUrl(response);
+            } catch (Exception e) {
+                LOG.errorf("Failed to parse review comments response: %s", e.getMessage());
+                break;
+            }
+        }
+
+        result.sort((a, b) -> a.createdOn().compareTo(b.createdOn()));
+        LOG.infof("Fetched %d comments in thread #%d on PR #%s", result.size(), rootCommentId, prId);
+        return result;
+    }
+
+    @Override
+    public List<String> getPullRequestComments(String org, String project, String repo, String prId) {
+        // Fetch general issue comments and inline review comments in parallel — independent endpoints
+        String issueUrl = baseUrl() + "/repos/" + org + "/" + repo
+                + "/issues/" + prId + "/comments?per_page=100";
+        String reviewUrl = baseUrl() + "/repos/" + org + "/" + repo
+                + "/pulls/" + prId + "/comments?per_page=100";
+
+        List<String> issueComments = new CopyOnWriteArrayList<>();
+        List<String> reviewComments = new CopyOnWriteArrayList<>();
+
+        CompletableFuture<Void> issueFuture = CompletableFuture.runAsync(
+                () -> collectComments(issueUrl, "get issue comments for PR #" + prId, false, issueComments),
+                ForkJoinPool.commonPool());
+        CompletableFuture<Void> reviewFuture = CompletableFuture.runAsync(
+                () -> collectReviewComments(reviewUrl, "get review comments for PR #" + prId, false, reviewComments),
+                ForkJoinPool.commonPool());
+
+        CompletableFuture.allOf(issueFuture, reviewFuture).join();
+
+        List<String> comments = new ArrayList<>(issueComments);
+        comments.addAll(reviewComments);
+        LOG.infof("Fetched %d review comments from PR #%s in %s/%s", comments.size(), prId, org, repo);
+        return comments;
+    }
+
+    @Override
+    public List<AgentComment> getAgentPrComments(String org, String project, String repo, String prId) {
+        List<AgentComment> comments = new ArrayList<>();
+
+        // General issue comments (non-inline)
+        String issueUrl = baseUrl() + "/repos/" + org + "/" + repo
+                + "/issues/" + prId + "/comments?per_page=100";
+        String url = issueUrl;
+        while (url != null) {
+            HttpResponse<String> response = getWithResponse(url, "get agent issue comments for PR #" + prId);
+            try {
+                JsonNode nodes = objectMapper.readTree(response.body());
+                if (nodes.isArray()) {
+                    for (JsonNode comment : nodes) {
+                        String author = comment.path("user").path("login").asText("");
+                        if (agentUser().isEmpty() || !author.equalsIgnoreCase(agentUser())) continue;
+                        String content = comment.path("body").asText("").trim();
+                        if (!content.isEmpty()) {
+                            comments.add(new AgentComment(comment.path("id").asLong(0), "", 0, content, 0L));
+                        }
+                    }
+                }
+                url = nextPageUrl(response);
+            } catch (Exception e) {
+                LOG.errorf("Failed to parse agent issue comments response: %s", e.getMessage());
+                break;
+            }
+        }
+
+        // Inline review comments
+        String reviewUrl = baseUrl() + "/repos/" + org + "/" + repo
+                + "/pulls/" + prId + "/comments?per_page=100";
+        url = reviewUrl;
+        while (url != null) {
+            HttpResponse<String> response = getWithResponse(url, "get agent review comments for PR #" + prId);
+            try {
+                JsonNode nodes = objectMapper.readTree(response.body());
+                if (nodes.isArray()) {
+                    for (JsonNode comment : nodes) {
+                        String author = comment.path("user").path("login").asText("");
+                        if (agentUser().isEmpty() || !author.equalsIgnoreCase(agentUser())) continue;
+                        String content = comment.path("body").asText("").trim();
+                        if (content.isEmpty()) continue;
+                        String filePath = comment.path("path").asText("");
+                        int line = comment.path("line").asInt(0);
+                        long inReplyToId = comment.path("in_reply_to_id").asLong(0);
+                        comments.add(new AgentComment(comment.path("id").asLong(0), filePath, line, content, inReplyToId));
+                    }
+                }
+                url = nextPageUrl(response);
+            } catch (Exception e) {
+                LOG.errorf("Failed to parse agent review comments response: %s", e.getMessage());
+                break;
+            }
+        }
+
+        LOG.infof("Fetched %d agent comments from PR #%s in %s/%s", comments.size(), prId, org, repo);
+        return comments;
+    }
+
+    @Override
+    public void resolveComment(String org, String project, String repo, String prId, long commentId) {
+        // GitHub review thread resolution requires the GraphQL API (resolveReviewThread mutation).
+        // The REST API does not expose thread resolution, so this is intentionally a no-op.
+        LOG.debugf("resolveComment is a no-op for GitHub (comment %d on PR #%s in %s/%s)",
+                commentId, prId, org, repo);
+    }
+
+    @Override
+    public List<String> listRepositories(String org) {
+        List<String> repos = new ArrayList<>();
+        String url = baseUrl() + "/orgs/" + org + "/repos?per_page=100";
+
+        while (url != null) {
+            HttpResponse<String> response = getWithResponse(url, "list repositories for org " + org);
+            try {
+                JsonNode nodes = objectMapper.readTree(response.body());
+                if (nodes.isArray()) {
+                    for (JsonNode repo : nodes) {
+                        String name = repo.path("name").asText("");
+                        if (!name.isEmpty()) repos.add(name);
+                    }
+                }
+                url = nextPageUrl(response);
+            } catch (Exception e) {
+                LOG.errorf("Failed to parse repositories response: %s", e.getMessage());
+                break;
+            }
+        }
+
+        LOG.infof("Listed %d repositories for org %s", repos.size(), org);
+        return repos;
+    }
+
+    @Override
+    public List<OpenPrEntry> listOpenPullRequests(String org, String project, String repo) {
+        List<OpenPrEntry> prs = new ArrayList<>();
+        String url = baseUrl() + "/repos/" + org + "/" + repo + "/pulls?state=open&per_page=100";
+
+        while (url != null) {
+            HttpResponse<String> response;
+            try {
+                response = getWithResponse(url, "list open PRs for " + org + "/" + repo);
+            } catch (Exception e) {
+                LOG.warnf("Failed to list open PRs for GitHub repo %s/%s: %s", org, repo, e.getMessage());
+                break;
+            }
+            try {
+                JsonNode nodes = objectMapper.readTree(response.body());
+                if (nodes.isArray()) {
+                    for (JsonNode pr : nodes) {
+                        String prId = String.valueOf(pr.path("number").asInt());
+                        String prUrl = pr.path("html_url").asText("");
+                        String title = pr.path("title").asText("");
+                        String sourceBranch = pr.path("head").path("ref").asText("");
+                        String targetBranch = pr.path("base").path("ref").asText("");
+                        String author = pr.path("user").path("login").asText("");
+                        String createdOn = pr.path("created_at").asText("");
+                        String updatedOn = pr.path("updated_at").asText("");
+                        prs.add(new OpenPrEntry(org, repo, prId, prUrl, title,
+                                sourceBranch, targetBranch, author, createdOn, updatedOn, null, "OPEN", false));
+                    }
+                }
+                url = nextPageUrl(response);
+            } catch (Exception e) {
+                LOG.errorf("Failed to parse open PRs response for %s/%s: %s", org, repo, e.getMessage());
+                break;
+            }
+        }
+
+        LOG.infof("Listed %d open PRs for GitHub repo %s/%s", prs.size(), org, repo);
+        return prs;
+    }
+
+    @Override
+    public List<OpenPrEntry> listMergedPullRequests(String org, String project, String repo,
+                                                     java.time.Instant since) {
+        List<OpenPrEntry> prs = new ArrayList<>();
+        // GitHub: state=closed returns both merged and unmerged closed PRs; filter by merged_at
+        String url = baseUrl() + "/repos/" + org + "/" + repo
+                + "/pulls?state=closed&sort=updated&direction=desc&per_page=100";
+
+        outer:
+        while (url != null) {
+            HttpResponse<String> response;
+            try {
+                response = getWithResponse(url, "list merged PRs for " + org + "/" + repo);
+            } catch (Exception e) {
+                LOG.warnf("Failed to list merged PRs for GitHub repo %s/%s: %s", org, repo, e.getMessage());
+                break;
+            }
+            try {
+                JsonNode nodes = objectMapper.readTree(response.body());
+                if (!nodes.isArray()) break;
+                for (JsonNode pr : nodes) {
+                    String updatedOn = pr.path("updated_at").asText("");
+                    // Stop paginating once we've gone past the since window
+                    if (!updatedOn.isBlank()) {
+                        java.time.Instant updatedAt = java.time.Instant.parse(updatedOn);
+                        if (updatedAt.isBefore(since)) break outer;
+                    }
+                    // Only include actually merged PRs (not just closed/declined)
+                    String mergedAt = pr.path("merged_at").asText(null);
+                    if (mergedAt == null || mergedAt.isBlank()) continue;
+
+                    String prId = String.valueOf(pr.path("number").asInt());
+                    String prUrl = pr.path("html_url").asText("");
+                    String title = pr.path("title").asText("");
+                    String sourceBranch = pr.path("head").path("ref").asText("");
+                    String targetBranch = pr.path("base").path("ref").asText("");
+                    String author = pr.path("user").path("login").asText("");
+                    String createdOn = pr.path("created_at").asText("");
+                    prs.add(new OpenPrEntry(org, repo, prId, prUrl, title,
+                            sourceBranch, targetBranch, author, createdOn, updatedOn, null, "MERGED", false));
+                }
+                url = nextPageUrl(response);
+            } catch (Exception e) {
+                LOG.errorf("Failed to parse merged PRs response for %s/%s: %s", org, repo, e.getMessage());
+                break;
+            }
+        }
+
+        LOG.infof("Listed %d merged PRs (since %s) for GitHub repo %s/%s", prs.size(), since, org, repo);
+        return prs;
+    }
+
+    private String token() {
+        return tokenFor("");
+    }
+
+    /**
+     * Returns the GitHub token for the given org/owner, checking for an org-specific
+     * override ({@code github.token.<org>}) before falling back to the global key.
+     */
+    String tokenFor(String org) {
+        if (org != null && !org.isBlank()) {
+            String orgToken = settingsService.getSecret("github.token." + org);
+            if (orgToken != null && !orgToken.isBlank()) {
+                return orgToken;
+            }
+        }
+        return settingsService.getSecret("github.token");
+    }
+
+    private String agentUser() {
+        return settingsService.get("github.agent.user");
+    }
+
+    @Override
+    public String buildCloneUrl(String workspace, String repoSlug) {
+        String user = !agentUser().isBlank() ? agentUser() : "x-access-token";
+        return "https://" + user + ":" + tokenFor(workspace) + "@github.com/" + workspace + "/" + repoSlug + ".git";
+    }
+
+    /**
+     * Ensures the given branch exists in the remote repository.
+     * If absent, it is created from the repository's default branch.
+     * Prevents a GitHub HTTP 422 "base does not exist" error when opening a PR.
+     */
+    private void ensureTargetBranchExists(String org, String repo, String branchName) {
+        try {
+            String checkUrl = baseUrl() + "/repos/" + org + "/" + repo + "/git/ref/heads/" + branchName;
+            requireTrustedUrl(checkUrl);
+            HttpRequest checkRequest = HttpRequest.newBuilder()
+                    .timeout(Duration.ofSeconds(30))
+                    .uri(URI.create(checkUrl))
+                    .header("Authorization", "Bearer " + token())
+                    .header("Accept", "application/vnd.github+json")
+                    .header("X-GitHub-Api-Version", "2022-11-28")
+                    .GET()
+                    .build();
+            HttpResponse<String> checkResponse = httpClient.send(checkRequest, HttpResponse.BodyHandlers.ofString());
+            if (checkResponse.statusCode() == 200) {
+                return;
+            }
+        } catch (Exception e) {
+            LOG.warnf("GitHub ensureTargetBranchExists: branch check error for '%s': %s", branchName, e.getMessage());
+        }
+
+        LOG.infof("Target branch '%s' not found in %s/%s — auto-creating from default branch", branchName, org, repo);
+        try {
+            String repoInfoUrl = baseUrl() + "/repos/" + org + "/" + repo;
+            String repoInfo = getAndReturn(repoInfoUrl, "get repo info");
+            String defaultBranch = objectMapper.readTree(repoInfo).path("default_branch").asText("main");
+
+            String defaultRefUrl = baseUrl() + "/repos/" + org + "/" + repo + "/git/ref/heads/" + defaultBranch;
+            String defaultRefInfo = getAndReturn(defaultRefUrl, "get default branch ref");
+            String sha = objectMapper.readTree(defaultRefInfo).path("object").path("sha").asText("");
+            if (sha.isBlank()) {
+                throw new RuntimeException("Could not resolve SHA for default branch '" + defaultBranch + "'");
+            }
+
+            String createUrl = baseUrl() + "/repos/" + org + "/" + repo + "/git/refs";
+            String createBody = """
+                    { "ref": "refs/heads/%s", "sha": "%s" }
+                    """.formatted(escapeJson(branchName), escapeJson(sha));
+            postAndReturn(createUrl, createBody, "create branch '" + branchName + "'");
+            LOG.infof("Auto-created branch '%s' from '%s' (%s) in %s/%s",
+                    branchName, defaultBranch, sha.substring(0, Math.min(8, sha.length())), org, repo);
+        } catch (Exception e) {
+            throw new RuntimeException(
+                    "Cannot auto-create target branch '%s' in %s/%s: %s".formatted(branchName, org, repo, e.getMessage()), e);
+        }
+    }
+
+    // ── Helpers ──────────────────────────────────────────────────────────
+
+    private String fetchPrHeadSha(String org, String repo, String prId) {
+        try {
+            String url = baseUrl() + "/repos/" + org + "/" + repo + "/pulls/" + prId;
+            String responseBody = getAndReturn(url, "get PR HEAD SHA #" + prId);
+            JsonNode node = objectMapper.readTree(responseBody);
+            String sha = node.path("head").path("sha").asText("");
+            return sha.isBlank() ? null : sha;
+        } catch (Exception e) {
+            LOG.warnf("Failed to fetch HEAD SHA for PR #%s: %s", prId, e.getMessage());
+            return null;
+        }
+    }
+
+    private void collectComments(String startUrl, String operation,
+                                 boolean agentOnly, List<String> out) {
+        String url = startUrl;
+        while (url != null) {
+            HttpResponse<String> response = getWithResponse(url, operation);
+            try {
+                JsonNode nodes = objectMapper.readTree(response.body());
+                if (nodes.isArray()) {
+                    for (JsonNode comment : nodes) {
+                        String author = comment.path("user").path("login").asText("");
+                        boolean isAgent = !agentUser().isEmpty() && author.equalsIgnoreCase(agentUser());
+                        if (agentOnly && !isAgent) continue;
+                        if (!agentOnly && isAgent) continue;
+                        String content = comment.path("body").asText("").trim();
+                        if (!content.isEmpty()) out.add(content);
+                    }
+                }
+                url = nextPageUrl(response);
+            } catch (Exception e) {
+                LOG.errorf("Failed to parse comments response: %s", e.getMessage());
+                break;
+            }
+        }
+    }
+
+    private void collectReviewComments(String startUrl, String operation,
+                                       boolean agentOnly, List<String> out) {
+        String url = startUrl;
+        while (url != null) {
+            HttpResponse<String> response = getWithResponse(url, operation);
+            try {
+                JsonNode nodes = objectMapper.readTree(response.body());
+                if (nodes.isArray()) {
+                    for (JsonNode comment : nodes) {
+                        String author = comment.path("user").path("login").asText("");
+                        boolean isAgent = !agentUser().isEmpty() && author.equalsIgnoreCase(agentUser());
+                        if (agentOnly && !isAgent) continue;
+                        if (!agentOnly && isAgent) continue;
+                        String content = comment.path("body").asText("").trim();
+                        if (content.isEmpty()) continue;
+                        String filePath = comment.path("path").asText("");
+                        int line = comment.path("line").asInt(0);
+                        if (!filePath.isEmpty() && line > 0) {
+                            out.add("[%s:%d] %s".formatted(filePath, line, content));
+                        } else if (!filePath.isEmpty()) {
+                            out.add("[%s] %s".formatted(filePath, content));
+                        } else {
+                            out.add(content);
+                        }
+                    }
+                }
+                url = nextPageUrl(response);
+            } catch (Exception e) {
+                LOG.errorf("Failed to parse review comments response: %s", e.getMessage());
+                break;
+            }
+        }
+    }
+
+    private long parseId(String responseBody) {
+        try {
+            JsonNode node = objectMapper.readTree(responseBody);
+            return node.path("id").asLong(0);
+        } catch (Exception e) {
+            LOG.warnf("Failed to parse ID from response: %s", e.getMessage());
+            return 0;
+        }
+    }
+
+    /**
+     * Extract the next-page URL from the {@code Link} response header (RFC 5988), if present.
+     * Returns null when there are no more pages.
+     */
+    private static String nextPageUrl(HttpResponse<String> response) {
+        String linkHeader = response.headers().firstValue("link").orElse("");
+        for (String part : linkHeader.split(",")) {
+            if (part.contains("rel=\"next\"")) {
+                int start = part.indexOf('<');
+                int end = part.indexOf('>');
+                if (start >= 0 && end > start) {
+                    return part.substring(start + 1, end).trim();
+                }
+            }
+        }
+        return null;
+    }
+
+    // ── HTTP helpers ─────────────────────────────────────────────────────
+
+    private String getAndReturn(String url, String operation) {
+        return getWithResponse(url, operation).body();
+    }
+
+    private HttpResponse<String> getWithResponse(String url, String operation) {
+        requireTrustedUrl(url);
+        try {
+            HttpRequest request = HttpRequest.newBuilder()
+                    .timeout(Duration.ofSeconds(30))
+                    .uri(URI.create(url))
+                    .header("Authorization", "Bearer " + token())
+                    .header("Accept", "application/vnd.github+json")
+                    .header("X-GitHub-Api-Version", "2022-11-28")
+                    .GET()
+                    .build();
+
+            HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+            if (response.statusCode() >= 200 && response.statusCode() < 300) {
+                return response;
+            } else {
+                LOG.errorf("GitHub %s failed (HTTP %d): %s", operation, response.statusCode(), response.body());
+                throw new RuntimeException("GitHub " + operation + " failed: HTTP "
+                        + response.statusCode() + " — " + response.body());
+            }
+        } catch (RuntimeException e) {
+            throw e;
+        } catch (Exception e) {
+            LOG.errorf("GitHub %s error: %s", operation, e.getMessage());
+            throw new RuntimeException("GitHub " + operation + " error: " + e.getMessage(), e);
+        }
+    }
+
+    private String postAndReturn(String url, String body, String operation) {
+        return sendAndReturn(url, body, "POST", operation);
+    }
+
+    private String putAndReturn(String url, String body, String operation) {
+        return sendAndReturn(url, body, "PUT", operation);
+    }
+
+    private String patchAndReturn(String url, String body, String operation) {
+        return sendAndReturn(url, body, "PATCH", operation);
+    }
+
+    private String sendAndReturn(String url, String body, String method, String operation) {
+        requireTrustedUrl(url);
+        try {
+            HttpRequest request = HttpRequest.newBuilder()
+                    .timeout(Duration.ofSeconds(30))
+                    .uri(URI.create(url))
+                    .header("Authorization", "Bearer " + token())
+                    .header("Content-Type", "application/json")
+                    .header("Accept", "application/vnd.github+json")
+                    .header("X-GitHub-Api-Version", "2022-11-28")
+                    .method(method, HttpRequest.BodyPublishers.ofString(body, StandardCharsets.UTF_8))
+                    .build();
+
+            HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+            if (response.statusCode() >= 200 && response.statusCode() < 300) {
+                LOG.infof("GitHub %s succeeded (HTTP %d)", operation, response.statusCode());
+                return response.body();
+            } else {
+                LOG.errorf("GitHub %s failed (HTTP %d): %s", operation, response.statusCode(), response.body());
+                throw new RuntimeException("GitHub " + operation + " failed: HTTP "
+                        + response.statusCode() + " — " + response.body());
+            }
+        } catch (RuntimeException e) {
+            throw e;
+        } catch (Exception e) {
+            LOG.errorf("GitHub %s error: %s", operation, e.getMessage());
+            throw new RuntimeException("GitHub " + operation + " error: " + e.getMessage(), e);
+        }
+    }
+
+    /**
+     * Validates that the target URL is directed at the configured GitHub host,
+     * preventing SSRF by ensuring requests never leave the configured API endpoint.
+     */
+    private void requireTrustedUrl(String url) {
+        try {
+            String configuredHost = URI.create(baseUrl()).getHost();
+            String targetHost = URI.create(url).getHost();
+            if (!targetHost.equalsIgnoreCase(configuredHost)) {
+                throw new IllegalArgumentException(
+                        "URL host '" + targetHost + "' does not match configured host '" + configuredHost + "'");
+            }
+        } catch (IllegalArgumentException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new IllegalArgumentException("Invalid URL: " + url, e);
+        }
+    }
+
+    /**
+     * Removes characters from an identifier that are not word characters, hyphens, or dots,
+     * preventing injection of metacharacters via user-supplied IDs.
+     */
+    private static String sanitizeId(String id) {
+        if (id == null) return "";
+        return id.replaceAll("[^\\w.-]", "");
+    }
+
+    @Override
+    public List<PrCommitEntry> getPrCommits(String org, String project, String repo, String prId) {
+        String url = baseUrl() + "/repos/" + org + "/" + repo + "/pulls/" + prId + "/commits?per_page=100";
+        List<PrCommitEntry> commits = new ArrayList<>();
+        while (url != null) {
+            try {
+                HttpResponse<String> response = getWithResponse(url, "get commits for PR #" + prId);
+                JsonNode array = objectMapper.readTree(response.body());
+                if (array.isArray()) {
+                    for (JsonNode commit : array) {
+                        String sha = commit.path("sha").asText("");
+                        String shortSha = sha.length() >= 7 ? sha.substring(0, 7) : sha;
+                        String message = commit.path("commit").path("message").asText("").trim();
+                        String authorName = commit.path("commit").path("author").path("name").asText("");
+                        String authorDate = commit.path("commit").path("author").path("date").asText("");
+                        commits.add(new PrCommitEntry(sha, shortSha, message, authorName, authorDate));
+                    }
+                }
+                url = nextPageUrl(response);
+            } catch (Exception e) {
+                LOG.warnf("Failed to fetch commits for GitHub PR #%s: %s", prId, e.getMessage());
+                break;
+            }
+        }
+        LOG.infof("Fetched %d commits for GitHub PR #%s in %s/%s", commits.size(), prId, org, repo);
+        return commits;
+    }
+
+    @Override
+    public String getCommitDiff(String org, String project, String repo, String sha) {
+        try {
+            String safeSha = sanitizeId(sha);
+            String url = baseUrl() + "/repos/" + org + "/" + repo + "/commits/" + safeSha;
+            requireTrustedUrl(url);
+            HttpRequest request = HttpRequest.newBuilder()
+                    .timeout(Duration.ofSeconds(30))
+                    .uri(URI.create(url))
+                    .header("Authorization", "Bearer " + token())
+                    .header("Accept", "application/vnd.github.v3.diff")
+                    .header("X-GitHub-Api-Version", "2022-11-28")
+                    .GET()
+                    .build();
+            HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+            if (response.statusCode() >= 200 && response.statusCode() < 300) {
+                return response.body();
+            }
+            LOG.warnf("GitHub get commit diff failed (HTTP %d) for sha %s", response.statusCode(), sha);
+            return "";
+        } catch (Exception e) {
+            LOG.warnf("GitHub get commit diff error for sha %s: %s", sha, e.getMessage());
+            return "";
+        }
+    }
+
+    private static String escapeJson(String text) {
+        if (text == null) return "";
+        return text.replace("\\", "\\\\")
+                .replace("\"", "\\\"")
+                .replace("\n", "\\n")
+                .replace("\r", "\\r")
+                .replace("\t", "\\t");
+    }
+}

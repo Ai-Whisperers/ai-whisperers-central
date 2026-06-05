@@ -1,0 +1,13 @@
+# Default owners
+* @IvanWeissVanDerPol
+
+# Infrastructure
+/stacks/ @IvanWeissVanDerPol
+/scripts/ @IvanWeissVanDerPol
+/configs/ @IvanWeissVanDerPol
+
+# Microservices
+/services/ @IvanWeissVanDerPol
+
+# CI/CD
+/.github/ @IvanWeissVanDerPol

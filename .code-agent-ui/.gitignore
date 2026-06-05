@@ -1,0 +1,7 @@
+node_modules
+dist
+.env*.local
+*.local
+
+# AIW: secrets pulled from bitwarden
+.env.local

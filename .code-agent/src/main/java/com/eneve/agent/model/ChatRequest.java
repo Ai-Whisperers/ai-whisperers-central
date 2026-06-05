@@ -1,0 +1,30 @@
+package com.eneve.agent.model;
+
+import org.eclipse.microprofile.openapi.annotations.media.Schema;
+
+@Schema(description = "Freeform chat request to the AI assistant")
+public record ChatRequest(
+        @Schema(required = true, description = "The user's question or message",
+                example = "Which team member is responsible for the payment service?")
+        String message,
+
+        @Schema(description = "Optional product ID to scope the assistant's knowledge",
+                example = "myproduct-platform")
+        String productId,
+
+        @Schema(description = "Optional conversation ID for future multi-turn support")
+        String conversationId,
+
+        @Schema(description = "Optional attachment IDs to include in the request")
+        java.util.List<String> attachmentIds,
+
+        @Schema(description = "Chat mode: 'chat' for general chat, 'ask' for read-only questions, 'plan' for planning requests",
+                example = "chat")
+        String mode,
+
+        @Schema(description = "Optional conversation context including customers, products, and issues")
+        ConversationContext conversationContext,
+
+        @Schema(description = "Optional thinking override: true=force on, false=force off, null=use server default")
+        Boolean thinking
+) {}

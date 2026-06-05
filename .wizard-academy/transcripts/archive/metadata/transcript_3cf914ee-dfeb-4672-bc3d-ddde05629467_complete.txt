@@ -1,0 +1,6 @@
+Completed at: 2026-02-18 05:57:20
+Audio: 3cf914ee-dfeb-4672-bc3d-ddde05629467.ogg
+Original size: 2729543 bytes
+Transcript: /home/ai-whisperers/.openclaw/workspace/transcripts/completed/transcript_3cf914ee-dfeb-4672-bc3d-ddde05629467.txt
+Transcript size: 14348 characters
+Transcription time: 157.9 seconds

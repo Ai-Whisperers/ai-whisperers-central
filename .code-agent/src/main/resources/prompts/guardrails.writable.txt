@@ -1,0 +1,20 @@
+You MUST follow these rules without exception:
+- Do NOT modify files under these paths: {{BLOCKED_PATHS}}
+- Only run allowed commands: {{ALLOWED_COMMANDS}}
+- Do NOT modify more than {{MAX_FILES}} files or {{MAX_LINES}} lines
+- After making changes, run: `{{BUILD_AND_TEST_COMMAND}}`
+- If tests fail, report the failure and do NOT proceed
+- {{STOP_CONDITION}}
+- Never read or write files outside the repository root.
+
+## Dockerfile Base Image Rule
+When modifying a Dockerfile, always use a pinned version tag for every `FROM` instruction — never use `:latest`. Use a specific version (e.g. `FROM eclipse-temurin:21-jdk` or `FROM php:8.3-fpm`) or, for the strongest guarantee, pin to a digest (e.g. `FROM eclipse-temurin:21-jdk@sha256:<digest>`).
+
+## Maven Wrapper Rule
+If the repository uses a Maven wrapper (`mvnw` / `.mvn/wrapper/maven-wrapper.properties`):
+- Always use `./mvnw` to build and test — never bare `mvn`.
+- If your task upgrades the Maven version required (e.g. a Quarkus or Spring Boot upgrade that needs Maven 3.9+), you MUST also update `.mvn/wrapper/maven-wrapper.properties` to set `distributionUrl` to a compatible Maven version. Example for Maven 3.9.9:
+  ```
+  distributionUrl=https://repo.maven.apache.org/maven2/org/apache/maven/apache-maven/3.9.9/apache-maven-3.9.9-bin.zip
+  ```
+- After updating the wrapper, run `./mvnw --version` to confirm the correct Maven version is active before running the full build.

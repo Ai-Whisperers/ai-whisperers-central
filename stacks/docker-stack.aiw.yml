@@ -1,0 +1,78 @@
+version: "3.8"
+
+services:
+  app:
+    image: ai-whisperers/code-agent:aiw-dev
+    env_file: /opt/aiw-code-agent/.env
+    environment:
+      DATABASE_URL: jdbc:postgresql://aiw-code-agent_postgres:5432/aiw_code_agent
+      DATABASE_USER: aiw_code_agent
+      DATABASE_PASSWORD: aiw_code_agent
+      KEYCLOAK_ENABLED: "false"
+      QUARKUS_LOG_LEVEL: "INFO"
+      QUARKUS_LOG_CATEGORY__COM_ENEVE_AGENT__LEVEL: "DEBUG"
+      ANTHROPIC_BASE_URL: http://litellm:4000
+    volumes:
+      - aiw-m2:/home/appuser/.m2
+      - aiw-workspace:/workspace
+      - /opt/aiw-lobster:/opt/aiw-lobster:ro
+    networks:
+      - agent-net
+      - aiw-internal
+      - aiw-infra-net
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+      replicas: 1
+      restart_policy:
+        condition: any
+        delay: 10s
+      update_config:
+        parallelism: 1
+        order: start-first
+      labels:
+        - "traefik.enable=true"
+        - "traefik.http.routers.aiwca-public.rule=Host(`code-agent.sunstein.cloud`)"
+        - "traefik.http.routers.aiwca-public.entrypoints=websecure"
+        - "traefik.http.routers.aiwca-public.tls.certresolver=letsencryptresolver"
+        - "traefik.http.routers.aiwca-public.service=aiwca-svc"
+        - "traefik.http.services.aiwca-svc.loadbalancer.server.port=8080"
+        - "traefik.swarm.network=agent-net"
+
+  postgres:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_DB: aiw_code_agent
+      POSTGRES_USER: aiw_code_agent
+      POSTGRES_PASSWORD: aiw_code_agent
+    volumes:
+      - aiw-pg:/var/lib/postgresql/data
+    networks:
+      - aiw-internal
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+      replicas: 1
+      restart_policy:
+        condition: any
+      placement:
+        constraints:
+          - node.role == manager
+      labels:
+        - "traefik.enable=false"
+
+volumes:
+  aiw-m2:
+  aiw-pg:
+  aiw-workspace:
+
+networks:
+  agent-net:
+    external: true
+  aiw-infra-net:
+    external: true
+  aiw-internal:
+    driver: overlay
+    attachable: false

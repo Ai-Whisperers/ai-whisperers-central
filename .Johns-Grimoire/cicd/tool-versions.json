@@ -1,0 +1,11 @@
+{
+  "tools": {
+    "dotnet-reportgenerator-globaltool": "5.5.1",
+    "dotnet-stryker": "4.8.1",
+    "dotnet-project-licenses": "2.7.1",
+    "CycloneDX": "5.5.0",
+    "docfx": "2.78.4",
+    "Microsoft.DotNet.ApiCompat.Tool": "10.0.100"
+  }
+}
+

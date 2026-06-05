@@ -1,0 +1,68 @@
+{
+  "annotations": {"list": []},
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 0,
+  "id": null,
+  "links": [],
+  "panels": [
+    {
+      "title": "n8n Workflow Executions",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0},
+      "targets": [
+        {"expr": "rate(n8n_workflow_executed_total[5m])", "legendFormat": "{{workflow_name}}", "refId": "A"},
+        {"expr": "rate(n8n_workflow_executed_total{status=\"error\"}[5m])", "legendFormat": "{{workflow_name}} (errors)", "refId": "B"}
+      ],
+      "fieldConfig": {"defaults": {"unit": "ops"}, "overrides": []}
+    },
+    {
+      "title": "n8n Execution Duration (p95)",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0},
+      "targets": [{"expr": "histogram_quantile(0.95, rate(n8n_workflow_execution_duration_seconds_bucket[5m]))", "legendFormat": "p95", "refId": "A"}],
+      "fieldConfig": {"defaults": {"unit": "s"}, "overrides": []}
+    },
+    {
+      "title": "LiteLLM Latency by Model",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8},
+      "targets": [{"expr": "histogram_quantile(0.5, rate(litellm_request_duration_seconds_bucket[5m]))", "legendFormat": "{{model}} p50", "refId": "A"}],
+      "fieldConfig": {"defaults": {"unit": "ms"}, "overrides": []}
+    },
+    {
+      "title": "LiteLLM Total Requests",
+      "type": "stat",
+      "gridPos": {"h": 4, "w": 6, "x": 12, "y": 8},
+      "targets": [{"expr": "sum(increase(litellm_requests_total[24h]))", "refId": "A"}],
+      "fieldConfig": {"defaults": {}, "overrides": []}
+    },
+    {
+      "title": "LiteLLM Errors",
+      "type": "stat",
+      "gridPos": {"h": 4, "w": 6, "x": 18, "y": 8},
+      "targets": [{"expr": "sum(increase(litellm_failed_requests_total[24h]))", "refId": "A"}],
+      "fieldConfig": {"defaults": {"thresholds": {"steps": [{"color": "green", "value": null}, {"color": "red", "value": 1}]}}, "overrides": []}
+    },
+    {
+      "title": "Model Usage Distribution",
+      "type": "piechart",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 12},
+      "targets": [{"expr": "sum by(model) (increase(litellm_requests_total[24h]))", "legendFormat": "{{model}}", "refId": "A"}],
+      "fieldConfig": {"defaults": {}, "overrides": []}
+    },
+    {
+      "title": "Context Memory Size",
+      "type": "stat",
+      "gridPos": {"h": 4, "w": 6, "x": 0, "y": 16},
+      "targets": [{"expr": "redis_db_keys{db=\"db1\"}", "refId": "A"}],
+      "fieldConfig": {"defaults": {}, "overrides": []}
+    }
+  ],
+  "schemaVersion": 39,
+  "tags": ["aiw", "nyx", "pipeline"],
+  "templating": {"list": []},
+  "time": {"from": "now-1h", "to": "now"},
+  "title": "Nyx WhatsApp AI Pipeline",
+  "uid": "nyx-pipeline"
+}

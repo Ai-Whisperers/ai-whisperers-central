@@ -1,0 +1,8 @@
+{
+  "MinLineCoverage": 80,
+  "MinBranchCoverage": 70,
+  "MinPublicApiCoverage": 90,
+  "ReportTypes": "Cobertura;HtmlInline_AzurePipelines;JsonSummary;Badges",
+  "AssemblyFilters": "+*;-*Tests;-*Benchmarks"
+}
+

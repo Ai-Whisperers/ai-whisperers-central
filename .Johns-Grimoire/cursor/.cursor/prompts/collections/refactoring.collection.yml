@@ -1,0 +1,29 @@
+id: refactoring-bundle
+name: "Refactoring"
+description: "Prompts for orchestrated structural refactoring after metric-driven improvements (boundaries, coupling, APIs, models, seams, diagrams)"
+tags:
+  - refactoring
+  - architecture
+  - maintainability
+  - design
+version: 1.0.0
+owner: team-prompts
+items:
+  - path: refactoring/orchestrate-refactoring-sessions.prompt.md
+    kind: prompt
+  - path: refactoring/refactoring-next-steps-sets.prompt.md
+    kind: prompt
+  - path: refactoring/refactor-dependency-direction-and-cycles.prompt.md
+    kind: prompt
+  - path: unit-testing/architecture-unit-tests.prompt.md
+    kind: prompt
+  - path: refactoring/refactor-module-boundaries-and-ownership.prompt.md
+    kind: prompt
+  - path: refactoring/refactor-public-api-surface.prompt.md
+    kind: prompt
+  - path: refactoring/refactor-branchy-logic-into-models.prompt.md
+    kind: prompt
+  - path: refactoring/refactor-determinism-and-test-seams.prompt.md
+    kind: prompt
+  - path: documentation/documentation-levels-and-mermaid-diagrams.prompt.md
+    kind: prompt

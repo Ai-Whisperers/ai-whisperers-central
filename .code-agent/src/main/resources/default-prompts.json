@@ -1,0 +1,321 @@
+{
+  "guardrails.readonly": {
+    "description": "Read-only guardrails injected into review prompts",
+    "placeholders": []
+  },
+  "guardrails.writable": {
+    "description": "Write-capable guardrails injected into fix/run prompts",
+    "placeholders": [
+      "BLOCKED_PATHS",
+      "ALLOWED_COMMANDS",
+      "MAX_FILES",
+      "MAX_LINES",
+      "STOP_CONDITION",
+      "BUILD_AND_TEST_COMMAND"
+    ]
+  },
+  "guardrails.tests": {
+    "description": "Guardrails for test-generation jobs — blocks all production source modifications",
+    "placeholders": [
+      "BLOCKED_PATHS",
+      "ALLOWED_COMMANDS",
+      "BUILD_AND_TEST_COMMAND",
+      "SOURCE_DIR",
+      "TEST_DIR"
+    ]
+  },
+  "guardrails.docs": {
+    "description": "Guardrails for documentation-generation jobs — only docs/ writes allowed",
+    "placeholders": [
+      "BLOCKED_PATHS",
+      "ALLOWED_COMMANDS"
+    ]
+  },
+  "review": {
+    "description": "Default code review task prompt — produces a JSON findings object",
+    "placeholders": [
+      "PR_TITLE",
+      "TARGET_BRANCH",
+      "DIFF_NOTE",
+      "MEMORY_SECTION",
+      "FALSE_POSITIVE_SECTION",
+      "IMPACT_SECTION",
+      "PREVIOUS_COMMENTS",
+      "DIFF_TRUNCATION_NOTE",
+      "DIFF",
+      "FRAMEWORK_CONTEXT"
+    ]
+  },
+  "fix-pr": {
+    "description": "Fixes review comments on a pull request by making targeted code changes",
+    "placeholders": [
+      "PR_TITLE",
+      "SOURCE_BRANCH",
+      "TARGET_BRANCH",
+      "COMMENTS",
+      "DIFF",
+      "BUILD_AND_TEST_COMMAND",
+      "FRAMEWORK_CONTEXT"
+    ]
+  },
+  "fix-comment": {
+    "description": "Applies a fix for a specific finding raised in a pull request review thread",
+    "placeholders": [
+      "FILE",
+      "LINE",
+      "SEVERITY",
+      "CATEGORY",
+      "FINDING",
+      "HUMAN_MESSAGE",
+      "THREAD",
+      "BUILD_AND_TEST_COMMAND"
+    ]
+  },
+  "reply": {
+    "description": "Responds to a developer comment on a pull request review thread",
+    "placeholders": [
+      "FILE",
+      "LINE",
+      "SEVERITY",
+      "CATEGORY",
+      "FINDING",
+      "THREAD",
+      "LATEST_MESSAGE"
+    ]
+  },
+  "generate-tests": {
+    "description": "Generates or improves unit tests for a project (Java, C#, TypeScript, PHP)",
+    "placeholders": [
+      "COVERAGE_SECTION",
+      "TARGET_FILES_SECTION",
+      "BUILD_AND_TEST_COMMAND",
+      "FRAMEWORK_CONTEXT"
+    ]
+  },
+  "generate-docs": {
+    "description": "Generates comprehensive Markdown documentation for a software project",
+    "placeholders": []
+  },
+  "metrics-fix": {
+    "description": "Refactors methods to reduce cyclomatic complexity without changing behaviour (Java, C#, TypeScript, PHP)",
+    "placeholders": [
+      "METRICS_SECTION",
+      "THRESHOLD",
+      "BUILD_AND_TEST_COMMAND"
+    ]
+  },
+  "planner": {
+    "description": "Creates a markdown plan document from a specification",
+    "placeholders": [
+      "REPO_URL",
+      "TARGET_BRANCH",
+      "SPEC"
+    ]
+  },
+  "pr-summary": {
+    "description": "Produces a structured JSON summary of a pull request diff",
+    "placeholders": [
+      "PR_TITLE",
+      "TARGET_BRANCH",
+      "FILE_LIST",
+      "DIAGRAM_SECTION",
+      "DIFF",
+      "DIAGRAM_OUTPUT_SPEC",
+      "DIAGRAM_RULE"
+    ]
+  },
+  "intent-classifier": {
+    "description": "Classifies a developer reply to a review comment as FIX or DISCUSS",
+    "placeholders": [
+      "FINDING",
+      "REPLY"
+    ]
+  },
+  "learning-extractor": {
+    "description": "Extracts a generalizable team preference or convention from a review thread",
+    "placeholders": [
+      "FILE",
+      "LINE",
+      "CATEGORY",
+      "FINDING",
+      "CONVERSATION"
+    ]
+  },
+  "finding-resolver.batch": {
+    "description": "Checks a batch of open review findings against the current code to determine which are resolved",
+    "placeholders": [
+      "FINDINGS_SECTION"
+    ]
+  },
+  "finding-resolver.single": {
+    "description": "Checks whether a single open review finding has been addressed in the current code",
+    "placeholders": [
+      "FILE",
+      "LINE",
+      "FINDING",
+      "CODE_CONTEXT"
+    ]
+  },
+  "self-review": {
+    "description": "Self-review prompt: agent reviews its own diff against the original task before linter/build validation",
+    "placeholders": [
+      "ORIGINAL_TASK",
+      "DIFF",
+      "FILES_CHANGED"
+    ]
+  },
+  "build-retry": {
+    "description": "Prompt for fixing build or test failures introduced by the agent's own changes",
+    "placeholders": [
+      "BUILD_OUTPUT",
+      "ATTEMPT",
+      "MAX_ATTEMPTS",
+      "AGENT_DIFF",
+      "JIRA_KEY",
+      "BRANCH"
+    ]
+  },
+  "chat-system": {
+    "description": "System prompt for the freeform chat endpoint — includes Markdown, Mermaid, and Chart.js formatting instructions",
+    "placeholders": [
+      "CUSTOMER_NAME",
+      "PRODUCT_CONTEXT",
+      "CONVERSATION_CONTEXT",
+      "CUSTOMER_TOOLS_SECTION",
+      "AWS_TOOLS_SECTION"
+    ]
+  },
+  "review-epic": {
+    "description": "AI readiness and complexity review for a Jira Epic",
+    "placeholders": ["jira_context"]
+  },
+  "review-feature": {
+    "description": "AI readiness and complexity review for a Jira Feature",
+    "placeholders": ["jira_context"]
+  },
+  "review-userstory": {
+    "description": "AI readiness and complexity review for a Jira User Story",
+    "placeholders": ["jira_context"]
+  },
+  "improve-epic": {
+    "description": "AI rewrite of a Jira Epic to sharpen goal, scope, and acceptance conditions",
+    "placeholders": ["jira_context"]
+  },
+  "improve-feature": {
+    "description": "AI rewrite of a Jira Feature to be user-focused, testable, and sprint-ready",
+    "placeholders": ["jira_context"]
+  },
+  "improve-userstory": {
+    "description": "AI rewrite of a Jira User Story following Given/When/Then best practices",
+    "placeholders": ["jira_context"]
+  },
+  "self-analysis": {
+    "description": "Autonomous self-analysis prompt: investigates a failed job, identifies code defects, and produces a targeted fix with a PR",
+    "placeholders": [
+      "FAILED_JOB_ID",
+      "JIRA_PROJECT_KEY",
+      "HAS_CLOUDWATCH_LOGS"
+    ]
+  },
+  "log-analysis-triage": {
+    "description": "Single-shot Haiku triage prompt: classifies a production log exception as GENUINE or NOISE with severity and a one-sentence reason",
+    "placeholders": [
+      "CUSTOMER_ID",
+      "ENVIRONMENT_NAME",
+      "EXCEPTION_CLASS",
+      "LOOKBACK_MINUTES",
+      "OCCURRENCE_COUNT",
+      "TOP_FRAMES",
+      "SAMPLE_MESSAGE"
+    ]
+  },
+  "log-analysis-deep": {
+    "description": "Deep root-cause analysis prompt: produces a structured markdown report with root cause, impact, fix recommendations, and prevention guidance for a production exception",
+    "placeholders": [
+      "EXCEPTION_CLASS",
+      "CUSTOMER_ID",
+      "ENVIRONMENT_NAME",
+      "OCCURRENCE_COUNT",
+      "FIRST_SEEN_AT",
+      "LAST_SEEN_AT",
+      "SEVERITY",
+      "AI_REASON",
+      "TOP_FRAMES",
+      "SAMPLE_MESSAGE"
+    ]
+  },
+  "generate-architecture": {
+    "description": "Generates a Structurizr DSL C4 architecture model by exploring the repository and writing docs/architecture.dsl",
+    "placeholders": [
+      "PRIOR_ARCHITECTURE_DSL"
+    ]
+  },
+  "scope-improve-chat": {
+    "description": "System prompt for the Product Owner AI chat on the Scope Improve screen — guides the AI to refine Jira scope items and call update_proposal",
+    "placeholders": [
+      "scope_name",
+      "issue_key",
+      "current_proposals",
+      "product_context",
+      "issue_type_guidance"
+    ]
+  },
+  "service-desk-triage": {
+    "description": "Single-shot Haiku triage prompt: classifies a Jira Service Desk ticket as QUESTION, REQUEST, BUG_REPORT, or OUTAGE_REPORT with severity and confidence",
+    "placeholders": [
+      "PROJECT_KEY",
+      "ISSUE_TYPE",
+      "PRIORITY",
+      "SUMMARY",
+      "DESCRIPTION"
+    ]
+  },
+  "service-desk-deep-analysis": {
+    "description": "Deep analysis prompt: produces a structured internal markdown report with root cause hypothesis, impact assessment, recommended next steps, and prevention guidance for a bug or outage ticket",
+    "placeholders": [
+      "ISSUE_KEY",
+      "PROJECT_KEY",
+      "CATEGORY",
+      "SEVERITY",
+      "TRIAGE_REASON",
+      "SUMMARY",
+      "DESCRIPTION",
+      "SIMILAR_TICKETS_SECTION",
+      "RELATED_OPEN_ISSUES_SECTION"
+    ]
+  },
+  "qa.testplan.analysis": {
+    "description": "ISTQB-aligned test plan analysis for a Jira feature and its user stories — produces a markdown analysis document",
+    "placeholders": [
+      "FEATURE_ID",
+      "FEATURE_SUMMARY",
+      "FEATURE_DESCRIPTION",
+      "STORIES"
+    ]
+  },
+  "qa.testplan.formatter": {
+    "description": "Converts a test plan analysis into the strict featureTestPlan JSON schema for the QA test plan viewer",
+    "placeholders": [
+      "FEATURE_ID",
+      "ANALYSIS"
+    ]
+  },
+  "qa.testcase.formatter": {
+    "description": "Generates structured test cases in strict JSON for a single user story, using the test plan's risk and gap context",
+    "placeholders": [
+      "FEATURE_KEY",
+      "FEATURE_TITLE",
+      "STORY_KEY",
+      "STORY_TITLE",
+      "STORY_DESCRIPTION",
+      "DEPENDENCIES",
+      "RISK_REFERENCES"
+    ]
+  },
+  "context-compaction": {
+    "description": "Prompt sent to Claude when the conversation history is compacted to free context window space. The response replaces older messages with a structured summary so long-running jobs can continue without hitting the context limit.",
+    "placeholders": [
+      "CUSTOM_INSTRUCTIONS"
+    ]
+  }
+}

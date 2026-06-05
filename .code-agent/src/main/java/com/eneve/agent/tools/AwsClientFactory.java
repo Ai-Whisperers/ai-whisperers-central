@@ -1,0 +1,238 @@
+package com.eneve.agent.tools;
+
+import com.eneve.agent.model.CloudAccount;
+import com.eneve.agent.settings.SettingsService;
+import org.jboss.logging.Logger;
+import software.amazon.awssdk.auth.credentials.AwsBasicCredentials;
+import software.amazon.awssdk.auth.credentials.AwsCredentialsProvider;
+import software.amazon.awssdk.auth.credentials.AwsSessionCredentials;
+import software.amazon.awssdk.auth.credentials.DefaultCredentialsProvider;
+import software.amazon.awssdk.auth.credentials.StaticCredentialsProvider;
+import software.amazon.awssdk.regions.Region;
+import software.amazon.awssdk.services.cloudfront.CloudFrontClient;
+import software.amazon.awssdk.services.cloudwatch.CloudWatchClient;
+import software.amazon.awssdk.services.cloudwatchlogs.CloudWatchLogsClient;
+import software.amazon.awssdk.services.ec2.Ec2Client;
+import software.amazon.awssdk.services.ecs.EcsClient;
+import software.amazon.awssdk.services.elasticache.ElastiCacheClient;
+import software.amazon.awssdk.services.elasticloadbalancingv2.ElasticLoadBalancingV2Client;
+import software.amazon.awssdk.services.lambda.LambdaClient;
+import software.amazon.awssdk.services.rds.RdsClient;
+import software.amazon.awssdk.services.s3.S3Client;
+import software.amazon.awssdk.services.sts.StsClient;
+import software.amazon.awssdk.services.sts.model.AssumeRoleRequest;
+import software.amazon.awssdk.services.sts.model.AssumeRoleResponse;
+import software.amazon.awssdk.services.sts.model.Credentials;
+
+import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.inject.Inject;
+
+/**
+ * Factory that creates short-lived AWS SDK v2 clients scoped to a specific customer account.
+ *
+ * <p>Authentication strategy:
+ * <ol>
+ *   <li>Base credentials: {@link DefaultCredentialsProvider} — picks up the ECS task role in
+ *       production, or {@code AWS_ACCESS_KEY_ID} / {@code AWS_SECRET_ACCESS_KEY} env vars in
+ *       local development (set via {@code aws.access-key-id} / {@code aws.secret-access-key}
+ *       config properties).</li>
+ *   <li>Cross-account access: when a {@code roleArn} is provided, STS {@code AssumeRole} is
+ *       called to obtain temporary credentials scoped to the target customer account. This is the
+ *       normal path in production — each customer account contains an {@code agent-readonly} role
+ *       that trusts the code-agent's AWS account.</li>
+ *   <li>Local dev fallback: when {@code roleArn} is blank the base credentials are used directly,
+ *       which is useful when the developer's local AWS profile already has access to the target
+ *       account.</li>
+ * </ol>
+ *
+ * <p>Required IAM permissions:
+ * <pre>
+ * Code-agent task role (your account):
+ *   sts:AssumeRole  on  arn:aws:iam::*:role/agent-readonly
+ *
+ * agent-readonly role (each customer account, trust policy allows code-agent account):
+ *   logs:DescribeLogGroups, logs:DescribeLogStreams, logs:FilterLogEvents
+ *   ecs:ListClusters, ecs:DescribeClusters, ecs:ListServices, ecs:DescribeServices,
+ *   ecs:ListTasks, ecs:DescribeTasks, ecs:DescribeTaskDefinition
+ *   cloudwatch:GetMetricStatistics, cloudwatch:GetMetricData
+ *   rds:DescribeDBInstances, rds:DescribeDBClusters
+ *   ec2:DescribeVpcs, ec2:DescribeSubnets, ec2:DescribeInstances,
+ *   ec2:DescribeSecurityGroups, ec2:DescribeInternetGateways, ec2:DescribeNatGateways
+ *   elasticloadbalancing:DescribeLoadBalancers, elasticloadbalancing:DescribeTargetGroups,
+ *   elasticloadbalancing:DescribeListeners
+ *   elasticache:DescribeCacheClusters, elasticache:DescribeReplicationGroups
+  *   lambda:ListFunctions
+ *   s3:ListAllMyBuckets
+ *   cloudfront:ListDistributions
+ * </pre>
+ */
+@ApplicationScoped
+public class AwsClientFactory {
+
+    private static final Logger LOG = Logger.getLogger(AwsClientFactory.class);
+    private static final String SESSION_NAME = "code-agent-readonly";
+    private static final int SESSION_DURATION_SECONDS = 3600;
+
+    @Inject
+    SettingsService settingsService;
+
+    // ─── Public factory methods ───────────────────────────────────────────────────
+
+    public CloudWatchLogsClient cloudWatchLogsClient(String roleArn, String region, CloudAccount account) {
+        checkEnabled();
+        return CloudWatchLogsClient.builder()
+                .credentialsProvider(resolveCredentials(roleArn, region, account))
+                .region(toRegion(region))
+                .build();
+    }
+
+    public EcsClient ecsClient(String roleArn, String region, CloudAccount account) {
+        checkEnabled();
+        return EcsClient.builder()
+                .credentialsProvider(resolveCredentials(roleArn, region, account))
+                .region(toRegion(region))
+                .build();
+    }
+
+    public CloudWatchClient cloudWatchClient(String roleArn, String region, CloudAccount account) {
+        checkEnabled();
+        return CloudWatchClient.builder()
+                .credentialsProvider(resolveCredentials(roleArn, region, account))
+                .region(toRegion(region))
+                .build();
+    }
+
+    public RdsClient rdsClient(String roleArn, String region, CloudAccount account) {
+        checkEnabled();
+        return RdsClient.builder()
+                .credentialsProvider(resolveCredentials(roleArn, region, account))
+                .region(toRegion(region))
+                .build();
+    }
+
+    public Ec2Client ec2Client(String roleArn, String region, CloudAccount account) {
+        checkEnabled();
+        return Ec2Client.builder()
+                .credentialsProvider(resolveCredentials(roleArn, region, account))
+                .region(toRegion(region))
+                .build();
+    }
+
+    public ElasticLoadBalancingV2Client elbV2Client(String roleArn, String region, CloudAccount account) {
+        checkEnabled();
+        return ElasticLoadBalancingV2Client.builder()
+                .credentialsProvider(resolveCredentials(roleArn, region, account))
+                .region(toRegion(region))
+                .build();
+    }
+
+    public ElastiCacheClient elastiCacheClient(String roleArn, String region, CloudAccount account) {
+        checkEnabled();
+        return ElastiCacheClient.builder()
+                .credentialsProvider(resolveCredentials(roleArn, region, account))
+                .region(toRegion(region))
+                .build();
+    }
+
+    public LambdaClient lambdaClient(String roleArn, String region, CloudAccount account) {
+        checkEnabled();
+        return LambdaClient.builder()
+                .credentialsProvider(resolveCredentials(roleArn, region, account))
+                .region(toRegion(region))
+                .build();
+    }
+
+    public S3Client s3Client(String roleArn, String region, CloudAccount account) {
+        checkEnabled();
+        return S3Client.builder()
+                .credentialsProvider(resolveCredentials(roleArn, region, account))
+                .region(toRegion(region))
+                .build();
+    }
+
+    /** CloudFront is a global service — always uses us-east-1 regardless of the configured region. */
+    public CloudFrontClient cloudFrontClient(String roleArn, CloudAccount account) {
+        checkEnabled();
+        return CloudFrontClient.builder()
+                .credentialsProvider(resolveCredentials(roleArn, "us-east-1", account))
+                .region(Region.US_EAST_1)
+                .build();
+    }
+
+    // ─── Internal ─────────────────────────────────────────────────────────────────
+
+    private void checkEnabled() {
+        boolean enabled = Boolean.parseBoolean(settingsService.get("tools.aws.enabled", "true"));
+        if (!enabled) {
+            throw new IllegalStateException("AWS tools are disabled. Set tools.aws.enabled=true to enable.");
+        }
+    }
+
+    private Region toRegion(String region) {
+        String defaultRegion = settingsService.get("aws.region", "eu-central-1");
+        return (region != null && !region.isBlank()) ? Region.of(region) : Region.of(defaultRegion);
+    }
+
+    private AwsCredentialsProvider resolveCredentials(String roleArn, String region, CloudAccount account) {
+        AwsCredentialsProvider base = baseCredentials(account);
+
+        if (roleArn == null || roleArn.isBlank()) {
+            LOG.debugf("No roleArn provided — using base credentials directly");
+            return base;
+        }
+
+        try {
+            Region stsRegion = toRegion(region);
+            StsClient sts = StsClient.builder()
+                    .credentialsProvider(base)
+                    .region(stsRegion)
+                    .build();
+
+            AssumeRoleResponse response = sts.assumeRole(AssumeRoleRequest.builder()
+                    .roleArn(roleArn)
+                    .roleSessionName(SESSION_NAME)
+                    .durationSeconds(SESSION_DURATION_SECONDS)
+                    .build());
+
+            Credentials c = response.credentials();
+            LOG.debugf("Assumed role %s — session expires %s", roleArn, c.expiration());
+
+            return StaticCredentialsProvider.create(
+                    AwsSessionCredentials.create(
+                            c.accessKeyId(),
+                            c.secretAccessKey(),
+                            c.sessionToken()
+                    )
+            );
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to assume role " + roleArn + ": " + e.getMessage(), e);
+        }
+    }
+
+    /**
+     * Resolves the base {@link AwsCredentialsProvider} using the following priority:
+     * <ol>
+     *   <li>Explicit credentials from the linked {@link CloudAccount} ({@code awsKeyId} /
+     *       {@code awsSecret} credential keys).</li>
+     *   <li>Global config properties {@code aws.access-key-id} / {@code aws.secret-access-key}.</li>
+     *   <li>{@link DefaultCredentialsProvider} — ECS task role or environment variables.</li>
+     * </ol>
+     */
+    private AwsCredentialsProvider baseCredentials(CloudAccount account) {
+        if (account != null && account.credentials() != null) {
+            String keyId = account.credentials().getOrDefault("awsKeyId", "").strip();
+            String secret = account.credentials().getOrDefault("awsSecret", "").strip();
+            if (!keyId.isBlank() && !secret.isBlank()) {
+                LOG.debugf("Using AWS credentials from cloud account '%s'", account.id());
+                return StaticCredentialsProvider.create(AwsBasicCredentials.create(keyId, secret));
+            }
+        }
+        String keyId = settingsService.getSecret("aws.access-key-id").strip();
+        String secret = settingsService.getSecret("aws.secret-access-key").strip();
+        if (!keyId.isBlank() && !secret.isBlank()) {
+            LOG.debugf("Using explicit AWS credentials from config");
+            return StaticCredentialsProvider.create(AwsBasicCredentials.create(keyId, secret));
+        }
+        return DefaultCredentialsProvider.create();
+    }
+}

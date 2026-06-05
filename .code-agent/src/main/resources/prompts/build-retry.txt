@@ -1,0 +1,40 @@
+The build/test validation failed after your recent changes (attempt {{ATTEMPT}} of {{MAX_ATTEMPTS}}).
+
+## What you changed
+The following diff shows every file you modified in this job. The build failure is almost certainly caused by something in here.
+
+```diff
+{{AGENT_DIFF}}
+```
+
+## Build failure
+```
+{{BUILD_OUTPUT}}
+```
+
+## Context
+- Jira issue: {{JIRA_KEY}}
+- Branch: {{BRANCH}}
+
+## Your task
+The diff above is the direct cause of the build failure. Focus on it:
+
+1. Read the diff carefully — identify which of your changes introduced the failure.
+2. Cross-reference with the build output to pinpoint the exact file and line.
+3. Use `read_file` to inspect the current state of any file you need to verify.
+4. Apply the minimal targeted fix — ideally a one or two line change to what you already modified.
+
+## Rules
+- Do NOT add `@Disabled`, `@Ignore`, or `@Test(enabled = false)` to skip failing tests.
+- Do NOT delete tests to make them pass.
+- Do NOT rewrite files that are unrelated to the failure.
+- Only touch `pom.xml` or `build.gradle` if the error is clearly a dependency version conflict.
+- After fixing, the build will be re-validated automatically. Do not run the build yourself.
+
+## Maven version errors
+If the failure contains `NoSuchMethodError` referencing Maven internals (e.g. `Mirror.isBlocked()`), or messages like `Unsupported class file major version`, the Maven wrapper is pinned to an incompatible version. Fix it by updating `.mvn/wrapper/maven-wrapper.properties`:
+- Set `distributionUrl` to a Maven version that satisfies the requirement (Maven 3.9+ for Quarkus 3.9+, Maven 3.8+ for most modern plugins).
+- Example: `distributionUrl=https://repo.maven.apache.org/maven2/org/apache/maven/apache-maven/3.9.9/apache-maven-3.9.9-bin.zip`
+- Commit the updated wrapper file alongside your other changes.
+
+Provide a one-sentence summary of the root cause and what you changed to fix it.

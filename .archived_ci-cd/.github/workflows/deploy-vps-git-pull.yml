@@ -1,0 +1,43 @@
+name: Deploy to VPS (git pull on VPS)
+
+on:
+  workflow_call:
+    inputs:
+      site-name:
+        description: 'Name of the site (matches clients.json key)'
+        required: true
+        type: string
+      vps-dir:
+        description: 'Directory on VPS where repo lives'
+        required: true
+        type: string
+      node-version:
+        description: 'Node.js version'
+        required: false
+        type: string
+        default: '20'
+    secrets:
+      VPS_HOST:
+        required: true
+      VPS_USER:
+        required: true
+      VPS_KEY:
+        required: true
+
+jobs:
+  deploy:
+    name: Deploy ${{ inputs.site-name }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Setup SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.VPS_KEY }}" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -H ${{ secrets.VPS_HOST }} >> ~/.ssh/known_hosts 2>/dev/null || true
+
+      - name: Deploy via SSH
+        run: |
+          ssh -o StrictHostKeyChecking=accept-new ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} \
+            "bash /opt/stacks/ci-cd/scripts/deploy-git-pull.sh '${{ inputs.site-name }}' '${{ inputs.vps-dir }}'"

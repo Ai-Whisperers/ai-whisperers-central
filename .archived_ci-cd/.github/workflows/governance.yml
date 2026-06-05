@@ -1,0 +1,32 @@
+name: Governance Checks
+
+on:
+  workflow_call:
+    inputs:
+      working-directory:
+        description: "Working directory to scan"
+        required: false
+        type: string
+        default: "."
+      fail-on-todo:
+        description: "Fail if TODO/FIXME/TBD markers are found"
+        required: false
+        type: boolean
+        default: true
+
+jobs:
+  governance:
+    name: verify-information / no-inventions / validation-before-completion / no-unnecessary-updates
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Run governance checks
+        run: |
+          python3 .github/scripts/governance_checks.py
+        working-directory: ${{ inputs.working-directory }}
+        env:
+          FAIL_ON_TODO: ${{ inputs.fail-on-todo }}

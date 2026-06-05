@@ -1,0 +1,49 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "Configuration file for validate-pre-merge.ps1 - Command-line parameters override these defaults",
+  
+  "TargetPath": ".",
+  "SkipAutoFix": false,
+  "SkipTests": false,
+  "Steps": "1-7",
+  "DiagnosticFilter": "",
+  "MaxOutputLines": 50,
+  "MaxFiles": 20,
+  "DryRun": false,
+  "JsonOutput": false,
+  
+  "_comments": {
+    "TargetPath": "Path to solution or directory. Default: current directory",
+    "SkipAutoFix": "Skip dotnet format auto-fixes. Use for dry-run inspection.",
+    "SkipTests": "Skip running tests (NOT RECOMMENDED - tests ensure fixes work)",
+    "Steps": "Steps to run: '1-7' (all), '1,3,5' (specific), or '3' (single)",
+    "DiagnosticFilter": "Filter build output by diagnostic codes: 'CS1591,IDE1006'",
+    "MaxOutputLines": "Truncate output for AI context limits (50-200 recommended)",
+    "MaxFiles": "Batch processing: show issues in first N files (10-50 recommended)",
+    "DryRun": "Show what would be done without executing (validation preview)",
+    "JsonOutput": "Output in JSON format for AI/automation consumption"
+  },
+  
+  "_examples": {
+    "Quick validation": {
+      "Steps": "3,4",
+      "SkipAutoFix": true,
+      "Comment": "Fast check: build + tests only (no auto-fix)"
+    },
+    "Documentation focus": {
+      "DiagnosticFilter": "CS1591",
+      "Steps": "1-3",
+      "Comment": "Fix and validate XML documentation only"
+    },
+    "Batch fixing": {
+      "MaxFiles": 10,
+      "MaxOutputLines": 30,
+      "Comment": "Fix 10 files at a time for large codebases"
+    },
+    "CI/CD pipeline": {
+      "SkipAutoFix": true,
+      "JsonOutput": true,
+      "Comment": "Validation only, structured output for pipeline"
+    }
+  }
+}

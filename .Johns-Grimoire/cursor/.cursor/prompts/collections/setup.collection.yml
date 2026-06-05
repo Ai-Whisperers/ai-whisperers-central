@@ -1,0 +1,17 @@
+id: setup-bundle
+name: "Repository Setup"
+description: "Prompts for initializing repositories and standards"
+tags:
+  - setup
+  - standards
+  - onboarding
+version: 1.0.0
+owner: team-prompts
+items:
+  - path: setup/bootstrap-new-repo.prompt.md
+    kind: prompt
+  - path: setup/setup-project-standards.prompt.md
+    kind: prompt
+  - path: setup/setup-repository-standards.prompt.md
+    kind: prompt
+

@@ -1,0 +1,49 @@
+services:
+  litellm:
+    image: ghcr.io/berriai/litellm:main-v1.81.14-stable
+    container_name: litellm
+    ports:
+      - "127.0.0.1:4000:4000"
+    volumes:
+      - ./config.yaml:/app/config.yaml
+    env_file:
+      - .env
+    environment:
+      - OLLAMA_API_BASE=http://host.docker.internal:11434
+    restart: unless-stopped
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      litellm-redis:
+        condition: service_started
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+          cpus: '4'
+    networks:
+      - litellm-network
+      - aiw-infra-net
+    command: --config /app/config.yaml --port 4000 --host 0.0.0.0 --num_workers 2
+
+  litellm-redis:
+    image: redis:7-alpine
+    container_name: litellm-redis
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+    volumes:
+      - litellm-redis-data:/data
+    networks:
+      - litellm-network
+
+networks:
+  litellm-network:
+    driver: bridge
+  aiw-infra-net:
+    external: true
+
+volumes:
+  litellm-redis-data:

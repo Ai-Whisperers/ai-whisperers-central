@@ -1,0 +1,40 @@
+id: script-prompts-bundle
+name: "Script Enhancement"
+description: "Prompts for building and upgrading reusable scripts"
+tags:
+  - scripting
+  - automation
+  - powershell
+  - python
+version: 1.0.0
+owner: team-prompts
+items:
+  - path: script/add-caching.prompt.md
+    kind: prompt
+  - path: script/add-config-file-support.prompt.md
+    kind: prompt
+  - path: script/add-parallel-processing.prompt.md
+    kind: prompt
+  - path: script/add-progress-reporting.prompt.md
+    kind: prompt
+  - path: script/add-retry-logic.prompt.md
+    kind: prompt
+  - path: script/add-structured-logging.prompt.md
+    kind: prompt
+  - path: script/add-unit-tests.prompt.md
+    kind: prompt
+  - path: script/add-webhook-notifications.prompt.md
+    kind: prompt
+  - path: script/build-and-find-errors.prompt.md
+    kind: prompt
+  - path: script/convert-to-reusable-script.prompt.md
+    kind: prompt
+  - path: script/create-powershell-script.prompt.md
+    kind: prompt
+  - path: script/create-python-script.prompt.md
+    kind: prompt
+  - path: script/migrate-to-shared-module.prompt.md
+    kind: prompt
+  - path: script/validate-script-standards.prompt.md
+    kind: prompt
+

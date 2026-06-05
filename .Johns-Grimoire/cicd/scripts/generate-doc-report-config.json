@@ -1,0 +1,8 @@
+{
+  "Configuration": "Release",
+  "OutputPath": "./docs-report",
+  "DisableParallel": false,
+  "ThrottleLimit": 4,
+  "EnableProfiling": false
+}
+

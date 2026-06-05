@@ -1,0 +1,271 @@
+{
+  "schemaVersion": 1,
+  "defaultContext": "default-branch",
+  "defaults": {
+    "gates": {
+      "ValidateTagContext": { "enabled": true, "severity": "error", "autoFix": "none" },
+      "BuildSolution": { "enabled": true, "severity": "error", "autoFix": "none" },
+      "VerifyXmlDocs": { "enabled": true, "severity": "error", "autoFix": "none" },
+      "FormatCheck": { "enabled": true, "severity": "error", "autoFix": "none" },
+      "UnitTests": { "enabled": true, "severity": "error", "autoFix": "none" },
+      "DocumentationValidation": { "enabled": true, "severity": "error", "autoFix": "none" },
+      "CoverageThreshold": { "enabled": true, "severity": "error", "autoFix": "none" },
+      "EnhancedCoverage": { "enabled": false, "severity": "warning", "autoFix": "none" },
+      "LicenseScan": { "enabled": true, "severity": "error", "autoFix": "none" },
+      "CodeMetrics": { "enabled": true, "severity": "warning", "autoFix": "none" },
+      "SecurityScan": { "enabled": false, "severity": "error", "autoFix": "none" },
+      "PackageMetadata": { "enabled": true, "severity": "error", "autoFix": "none" },
+      "BreakingChanges": { "enabled": false, "severity": "warning", "autoFix": "none" },
+      "MutationTesting": { "enabled": false, "severity": "warning", "autoFix": "none" },
+      "Benchmarks": { "enabled": false, "severity": "warning", "autoFix": "none" },
+      "ReleaseNotes": { "enabled": false, "severity": "error", "autoFix": "none" },
+      "DocumentationReport": { "enabled": false, "severity": "info", "autoFix": "none" },
+      "PackageAndSbom": { "enabled": false, "severity": "error", "autoFix": "none" }
+    }
+  },
+  "contexts": [
+    {
+      "name": "tag-security",
+      "description": "Security tag builds run security scan only and skip optional gates.",
+      "match": { "tagPrefix": "security-" },
+      "overrides": {
+        "gates": {
+          "LicenseScan": { "enabled": false },
+          "CodeMetrics": { "enabled": false },
+          "PackageMetadata": { "enabled": false },
+          "SecurityScan": { "enabled": true },
+          "CoverageThreshold": { "enabled": false },
+          "EnhancedCoverage": { "enabled": false },
+          "DocumentationReport": { "enabled": false },
+          "PackageAndSbom": { "enabled": false },
+          "BreakingChanges": { "enabled": false },
+          "ReleaseNotes": { "enabled": false },
+          "Benchmarks": { "enabled": false }
+        }
+      }
+    },
+    {
+      "name": "tag-release",
+      "description": "Release tags run full release validation and packaging.",
+      "match": { "tagPrefix": "release-" },
+      "overrides": {
+        "gates": {
+          "BreakingChanges": { "enabled": true },
+          "ReleaseNotes": { "enabled": true },
+          "SecurityScan": { "enabled": true },
+          "EnhancedCoverage": { "enabled": true },
+          "DocumentationReport": { "enabled": true },
+          "Benchmarks": { "enabled": true },
+          "PackageAndSbom": { "enabled": true }
+        }
+      }
+    },
+    {
+      "name": "tag-test",
+      "description": "Test tags run optional analysis without release notes.",
+      "match": { "tagPrefix": "test-" },
+      "overrides": {
+        "gates": {
+          "SecurityScan": { "enabled": true },
+          "EnhancedCoverage": { "enabled": true },
+          "DocumentationReport": { "enabled": true },
+          "PackageAndSbom": { "enabled": false }
+        }
+      }
+    },
+    {
+      "name": "tag-coverage",
+      "description": "Coverage tags focus on coverage analysis and reporting.",
+      "match": { "tagPrefix": "coverage-" },
+      "overrides": {
+        "gates": {
+          "VerifyXmlDocs": { "enabled": false },
+          "FormatCheck": { "enabled": false },
+          "DocumentationValidation": { "enabled": false },
+          "CoverageThreshold": { "enabled": true },
+          "EnhancedCoverage": { "enabled": true },
+          "LicenseScan": { "enabled": false },
+          "CodeMetrics": { "enabled": false },
+          "SecurityScan": { "enabled": false },
+          "PackageMetadata": { "enabled": false },
+          "BreakingChanges": { "enabled": false },
+          "MutationTesting": { "enabled": false },
+          "Benchmarks": { "enabled": false },
+          "ReleaseNotes": { "enabled": false },
+          "DocumentationReport": { "enabled": false },
+          "PackageAndSbom": { "enabled": false }
+        }
+      }
+    },
+    {
+      "name": "tag-docs",
+      "description": "Documentation tags run build and documentation reporting only.",
+      "match": { "tagPrefix": "docs-" },
+      "overrides": {
+        "gates": {
+          "VerifyXmlDocs": { "enabled": false },
+          "FormatCheck": { "enabled": false },
+          "UnitTests": { "enabled": false },
+          "DocumentationValidation": { "enabled": false },
+          "CoverageThreshold": { "enabled": false },
+          "EnhancedCoverage": { "enabled": false },
+          "LicenseScan": { "enabled": false },
+          "CodeMetrics": { "enabled": false },
+          "SecurityScan": { "enabled": false },
+          "PackageMetadata": { "enabled": false },
+          "BreakingChanges": { "enabled": false },
+          "MutationTesting": { "enabled": false },
+          "Benchmarks": { "enabled": false },
+          "ReleaseNotes": { "enabled": false },
+          "DocumentationReport": { "enabled": true },
+          "PackageAndSbom": { "enabled": false }
+        }
+      }
+    },
+    {
+      "name": "tag-mutation",
+      "description": "Mutation tags run build and mutation testing only.",
+      "match": { "tagPrefix": "mutation-" },
+      "overrides": {
+        "gates": {
+          "VerifyXmlDocs": { "enabled": false },
+          "FormatCheck": { "enabled": false },
+          "UnitTests": { "enabled": false },
+          "DocumentationValidation": { "enabled": false },
+          "CoverageThreshold": { "enabled": false },
+          "EnhancedCoverage": { "enabled": false },
+          "LicenseScan": { "enabled": false },
+          "CodeMetrics": { "enabled": false },
+          "SecurityScan": { "enabled": false },
+          "PackageMetadata": { "enabled": false },
+          "BreakingChanges": { "enabled": false },
+          "MutationTesting": { "enabled": true },
+          "Benchmarks": { "enabled": false },
+          "ReleaseNotes": { "enabled": false },
+          "DocumentationReport": { "enabled": false },
+          "PackageAndSbom": { "enabled": false }
+        }
+      }
+    },
+    {
+      "name": "tag-unittest",
+      "description": "Unit test tags run build and unit tests only.",
+      "match": { "tagPrefix": "unittest-" },
+      "overrides": {
+        "gates": {
+          "VerifyXmlDocs": { "enabled": false },
+          "FormatCheck": { "enabled": false },
+          "DocumentationValidation": { "enabled": false },
+          "CoverageThreshold": { "enabled": false },
+          "EnhancedCoverage": { "enabled": false },
+          "LicenseScan": { "enabled": false },
+          "CodeMetrics": { "enabled": false },
+          "SecurityScan": { "enabled": false },
+          "PackageMetadata": { "enabled": false },
+          "BreakingChanges": { "enabled": false },
+          "MutationTesting": { "enabled": false },
+          "Benchmarks": { "enabled": false },
+          "ReleaseNotes": { "enabled": false },
+          "DocumentationReport": { "enabled": false },
+          "PackageAndSbom": { "enabled": false }
+        }
+      }
+    },
+    {
+      "name": "tag-performancebenchmark",
+      "description": "Performance benchmark tags run build and benchmarks only.",
+      "match": { "tagPrefix": "performancebenchmark-" },
+      "overrides": {
+        "gates": {
+          "VerifyXmlDocs": { "enabled": false },
+          "FormatCheck": { "enabled": false },
+          "UnitTests": { "enabled": false },
+          "DocumentationValidation": { "enabled": false },
+          "CoverageThreshold": { "enabled": false },
+          "EnhancedCoverage": { "enabled": false },
+          "LicenseScan": { "enabled": false },
+          "CodeMetrics": { "enabled": false },
+          "SecurityScan": { "enabled": false },
+          "PackageMetadata": { "enabled": false },
+          "BreakingChanges": { "enabled": false },
+          "MutationTesting": { "enabled": false },
+          "Benchmarks": { "enabled": true },
+          "ReleaseNotes": { "enabled": false },
+          "DocumentationReport": { "enabled": false },
+          "PackageAndSbom": { "enabled": false }
+        }
+      }
+    },
+    {
+      "name": "tag-licensecheck",
+      "description": "License check tags run build and license scan only.",
+      "match": { "tagPrefix": "licensecheck-" },
+      "overrides": {
+        "gates": {
+          "VerifyXmlDocs": { "enabled": false },
+          "FormatCheck": { "enabled": false },
+          "UnitTests": { "enabled": false },
+          "DocumentationValidation": { "enabled": false },
+          "CoverageThreshold": { "enabled": false },
+          "EnhancedCoverage": { "enabled": false },
+          "CodeMetrics": { "enabled": false },
+          "SecurityScan": { "enabled": false },
+          "PackageMetadata": { "enabled": false },
+          "BreakingChanges": { "enabled": false },
+          "MutationTesting": { "enabled": false },
+          "Benchmarks": { "enabled": false },
+          "ReleaseNotes": { "enabled": false },
+          "DocumentationReport": { "enabled": false },
+          "PackageAndSbom": { "enabled": false }
+        }
+      }
+    },
+    {
+      "name": "pull-request",
+      "description": "PR builds use default gates for fast feedback.",
+      "match": { "reason": "PullRequest" },
+      "overrides": {}
+    },
+    {
+      "name": "branch-main",
+      "description": "Main branch includes breaking change checks without benchmarks by default.",
+      "match": { "branch": "refs/heads/main" },
+      "overrides": {
+        "gates": {
+          "BreakingChanges": { "enabled": true },
+          "Benchmarks": { "enabled": false }
+        }
+      }
+    },
+    {
+      "name": "branch-develop",
+      "description": "Develop branch enforces coverage, metrics, license scan, and mutation testing.",
+      "match": { "branch": "refs/heads/develop" },
+      "overrides": {
+        "gates": {
+          "LicenseScan": { "enabled": true },
+          "CodeMetrics": { "enabled": true },
+          "CoverageThreshold": { "enabled": true },
+          "MutationTesting": { "enabled": true },
+          "Benchmarks": { "enabled": false }
+        }
+      }
+    },
+    {
+      "name": "branch-release",
+      "description": "Release branches keep default gates without benchmarks by default.",
+      "match": { "branchPrefix": "refs/heads/release/" },
+      "overrides": {
+        "gates": {
+          "Benchmarks": { "enabled": false }
+        }
+      }
+    },
+    {
+      "name": "default-branch",
+      "description": "Fallback for feature/other branches.",
+      "match": {},
+      "overrides": {}
+    }
+  ]
+}

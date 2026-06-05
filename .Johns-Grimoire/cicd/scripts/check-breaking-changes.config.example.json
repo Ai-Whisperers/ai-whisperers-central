@@ -1,0 +1,43 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Check Breaking Changes Configuration",
+  "description": "Configuration file for check-breaking-changes.ps1 script",
+  "type": "object",
+  "properties": {
+    "Configuration": {
+      "type": "string",
+      "enum": ["Debug", "Release"],
+      "default": "Release",
+      "description": "Build configuration to analyze (Debug or Release)"
+    },
+    "BaselineTag": {
+      "type": "string",
+      "default": "",
+      "description": "Git tag to use as baseline for comparison. If empty, uses last release-* tag"
+    },
+    "OutputPath": {
+      "type": "string",
+      "default": "",
+      "description": "Directory to write compatibility reports. If empty, auto-detects from environment"
+    },
+    "DisableParallel": {
+      "type": "boolean",
+      "default": false,
+      "description": "Disable parallel processing (use sequential instead)"
+    },
+    "ThrottleLimit": {
+      "type": "integer",
+      "minimum": 1,
+      "default": 4,
+      "description": "Maximum number of concurrent threads for parallel processing"
+    }
+  },
+  "example": {
+    "Configuration": "Release",
+    "BaselineTag": "",
+    "OutputPath": "",
+    "DisableParallel": false,
+    "ThrottleLimit": 4
+  }
+}
+

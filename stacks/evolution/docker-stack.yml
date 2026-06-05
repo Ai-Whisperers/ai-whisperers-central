@@ -1,0 +1,123 @@
+version: "3.7"
+services:
+
+  evolution_api:
+    image: evoapicloud/evolution-api:latest
+
+    volumes:
+      - evolution_instances:/evolution/instances
+
+    networks:
+      - network_overlay
+      - aiw-infra-net
+
+    environment:
+      - SERVER_URL=https://evolution.sunstein.cloud
+      - AUTHENTICATION_API_KEY=a53c00ff3726d2ced6bbfeba8d1a1e90
+      - AUTHENTICATION_EXPOSE_IN_FETCH_INSTANCES=true
+      - DEL_INSTANCE=false
+      - QRCODE_LIMIT=1902
+      - LANGUAGE=pt-BR
+
+      - CONFIG_SESSION_PHONE_CLIENT=OpenClaw
+      - CONFIG_SESSION_PHONE_NAME=Chrome
+
+      - DATABASE_ENABLED=true
+      - DATABASE_PROVIDER=postgresql
+      - DATABASE_CONNECTION_URI=postgresql://postgres:2c9a91153a5312dbe0ad9398cceccb4c@postgres:5432/evolution
+      - DATABASE_CONNECTION_CLIENT_NAME=evolution
+      - DATABASE_SAVE_DATA_INSTANCE=true
+      - DATABASE_SAVE_DATA_NEW_MESSAGE=true
+      - DATABASE_SAVE_MESSAGE_UPDATE=true
+      - DATABASE_SAVE_DATA_CONTACTS=true
+      - DATABASE_SAVE_DATA_CHATS=true
+      - DATABASE_SAVE_DATA_LABELS=true
+      - DATABASE_SAVE_DATA_HISTORIC=true
+
+      - N8N_ENABLED=true
+      - EVOAI_ENABLED=true
+      - OPENAI_ENABLED=true
+      - DIFY_ENABLED=true
+      - TYPEBOT_ENABLED=true
+      - TYPEBOT_API_VERSION=latest
+
+      - CHATWOOT_ENABLED=true
+      - CHATWOOT_MESSAGE_READ=true
+      - CHATWOOT_MESSAGE_DELETE=true
+      - CHATWOOT_IMPORT_PLACEHOLDER_MEDIA_MESSAGE=false
+
+      - CACHE_REDIS_ENABLED=true
+      - CACHE_REDIS_URI=redis://evolution_redis:6379/1
+      - CACHE_REDIS_PREFIX_KEY=evolution
+      - CACHE_REDIS_SAVE_INSTANCES=false
+      - CACHE_LOCAL_ENABLED=false
+
+      - S3_ENABLED=false
+
+      - WA_BUSINESS_TOKEN_WEBHOOK=evolution
+      - WA_BUSINESS_URL=https://graph.facebook.com
+      - WA_BUSINESS_VERSION=v23.0
+      - WA_BUSINESS_LANGUAGE=pt_BR
+
+      - TELEMETRY=false
+
+      - WEBSOCKET_ENABLED=false
+      - WEBSOCKET_GLOBAL_EVENTS=false
+
+      - RABBITMQ_ENABLED=false
+
+      - WEBHOOK_GLOBAL_ENABLED=false
+
+      - SQS_ENABLED=false
+
+      - PROVIDER_ENABLED=false
+
+    deploy:
+      mode: replicated
+      replicas: 1
+      placement:
+        constraints:
+          - node.role == manager
+      labels:
+        - traefik.enable=true
+        - traefik.http.routers.evolution.rule=Host(`evolution.sunstein.cloud`)
+        - traefik.http.routers.evolution.entrypoints=websecure
+        - traefik.http.routers.evolution.priority=1
+        - traefik.http.routers.evolution.tls.certresolver=letsencryptresolver
+        - traefik.http.routers.evolution.service=evolution
+        - traefik.http.services.evolution.loadbalancer.server.port=8080
+        - traefik.http.services.evolution.loadbalancer.passHostHeader=true
+
+  evolution_redis:
+    image: redis:latest
+    command: ["redis-server", "--appendonly", "yes", "--port", "6379"]
+
+    volumes:
+      - evolution_redis:/data
+
+    networks:
+      - network_overlay
+
+    deploy:
+      placement:
+        constraints:
+          - node.role == manager
+      resources:
+        limits:
+          cpus: "1"
+          memory: 1024M
+
+volumes:
+  evolution_instances:
+    external: true
+    name: evolution_instances
+  evolution_redis:
+    external: true
+    name: evolution_redis
+
+networks:
+  network_overlay:
+    external: true
+    name: agent-net
+  aiw-infra-net:
+    external: true

@@ -1,0 +1,13 @@
+id: benchmark-setup-bundle
+name: "Benchmark Setup"
+description: "Prompts for creating benchmark project plans and setup guidance"
+tags:
+  - benchmark
+  - performance
+  - planning
+version: 1.0.0
+owner: team-prompts
+items:
+  - path: benchmark/setup-benchmark-project.prompt.md
+    kind: prompt
+

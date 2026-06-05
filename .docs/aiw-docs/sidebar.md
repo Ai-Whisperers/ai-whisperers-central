@@ -1,0 +1,29 @@
+- [Home](/)
+- Getting Started
+  - [Installation & Setup](/getting-started/installation.md)
+  - [Quick Start](/getting-started/quick-start.md)
+  - [First Steps](/getting-started/first-steps.md)
+- Architecture
+  - [System Overview](/architecture/overview.md)
+  - [Network Architecture](/architecture/network.md)
+  - [Service Dependency Map](/architecture/services.md)
+  - [Data Flow](/architecture/data-flow.md)
+  - [ADR Index](/architecture/adr/)
+- Operations
+  - [Health Monitoring](/operations/health-monitoring.md)
+  - [Deployment Guide](/operations/deployment.md)
+  - [Rollback](/operations/rollback.md)
+  - [Incident Response](/operations/incident-response.md)
+  - [Backup & Recovery](/operations/backup.md)
+- Guides
+  - [Using Nyx](/guides/using-nyx.md)
+  - [Hermes Code Agent](/guides/hermes-agent.md)
+  - [Knowledge Base](/guides/knowledge-base.md)
+  - [Adding Models](/guides/adding-models.md)
+  - [Pipeline](/guides/pipeline.md)
+- Reference
+  - [Environment Variables](/reference/environment-variables.md)
+  - [API Reference](/reference/api.md)
+  - [CLI Commands](/reference/cli.md)
+  - [Ports & Endpoints](/reference/ports.md)
+  - [Troubleshooting](/reference/troubleshooting.md)

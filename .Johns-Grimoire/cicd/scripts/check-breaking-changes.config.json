@@ -1,0 +1,49 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "check-breaking-changes.ps1 Configuration",
+  "description": "Configuration file for API compatibility checking script",
+  "type": "object",
+  "properties": {
+    "Configuration": {
+      "type": "string",
+      "enum": ["Debug", "Release"],
+      "default": "Release",
+      "description": "Build configuration to use for compatibility checking"
+    },
+    "BaselineTag": {
+      "type": "string",
+      "pattern": "^release-\\d+\\.\\d+\\.\\d+(-rc\\d+)?$",
+      "description": "Git tag to use as baseline. If empty, uses last release-* tag"
+    },
+    "OutputPath": {
+      "type": "string",
+      "description": "Directory to write compatibility reports. Default: Azure Pipelines staging or local ./api-compat"
+    },
+    "DisableParallel": {
+      "type": "boolean",
+      "default": false,
+      "description": "Disable parallel processing (forces sequential processing)"
+    },
+    "ThrottleLimit": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 32,
+      "default": 0,
+      "description": "Maximum concurrent threads for parallel processing. 0 = NUMBER_OF_PROCESSORS"
+    }
+  },
+  "examples": [
+    {
+      "Configuration": "Release",
+      "BaselineTag": "release-1.0.0",
+      "OutputPath": "./reports/api-compat",
+      "DisableParallel": false,
+      "ThrottleLimit": 4
+    },
+    {
+      "Configuration": "Debug",
+      "DisableParallel": true
+    }
+  ]
+}
+
