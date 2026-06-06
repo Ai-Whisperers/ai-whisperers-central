@@ -77,9 +77,12 @@ All services run on a single 32GB VPS via Docker Swarm with Traefik reverse prox
 │   └── model-eval.sh          # Model evaluation tool
 ├── docs/                      # Documentation
 │   └── architecture/          # Architecture Decision Records
-├── .env.template              # Environment variable template
+├── .env.template              # Infrastructure env template
+├── .code-agent/.env.aiw.example        # Agent env template
+├── .code-agent-ui/.env.aiw.example     # Frontend env template
 └── deploy.sh                  # Master deployment script
 ```
+The consolidated structure is the current source of truth.
 
 ## Quick Start
 
@@ -93,8 +96,8 @@ All services run on a single 32GB VPS via Docker Swarm with Traefik reverse prox
 ### Installation
 
 ```bash
-git clone https://github.com/Ai-Whisperers/aiw-infra.git
-cd aiw-infra
+git clone https://github.com/Ai-Whisperers/ai-whisperers-central.git
+cd ai-whisperers-central
 cp .env.template .env          # Edit with your values
 ```
 

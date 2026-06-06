@@ -2,3 +2,8 @@
 node_modules
 .next
 .git
+
+# Agent/frontend env templates (example files — do not put live values here)
+.env.aiw.example
+.env.development
+.env.production
