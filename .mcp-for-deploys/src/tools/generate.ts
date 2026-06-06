@@ -359,6 +359,7 @@ function detectEntryPoint(projectPath: string, framework: string): string {
     "dist/index.js",
     "main.py",
     "app.py",
+    "app_kernel.py",
     "manage.py",
   ];
 

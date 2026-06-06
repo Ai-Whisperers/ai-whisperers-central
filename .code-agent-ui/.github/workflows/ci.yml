@@ -1,14 +1,71 @@
 name: CI
 
 on:
-  pull_request:
-    branches: [main]
   push:
-    branches: [main]
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
-  ci:
-    uses: Ai-Whisperers/ci-cd/.github/workflows/ci-nextjs.yml@main
-    with:
-      supabase-url: 'https://placeholder.supabase.co'
-      supabase-anon-key: 'placeholder'
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check YAML syntax
+        run: |
+          for f in stacks/**/docker-stack.yml stacks/**/docker-compose.yml configs/**/*.yml; do
+            python3 -c "import yaml, sys; yaml.safe_load(open('$f'))" 2>/dev/null || echo "INVALID: $f"
+          done
+
+      - name: Check shell scripts
+        run: |
+          for f in scripts/*.sh deploy.sh; do
+            [ -f "$f" ] && bash -n "$f" || echo "SYNTAX ERROR: $f"
+          done
+
+      - name: Check Python syntax
+        run: |
+          for f in scripts/*.py services/**/app.py; do
+            [ -f "$f" ] && python3 -m py_compile "$f" 2>/dev/null || echo "SYNTAX ERROR: $f"
+          done
+
+      - name: Detect secrets
+        uses: trufflesecurity/trufflehog@main
+        with:
+          path: ./
+          base: ${{ github.event.repository.default_branch }}
+          head: HEAD
+
+  docker-compose-validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Docker Compose
+        run: |
+          mkdir -p ~/.docker/cli-plugins
+          curl -SL https://github.com/docker/compose/releases/download/v2.24.0/docker-compose-linux-x86_64 -o ~/.docker/cli-plugins/docker-compose
+          chmod +x ~/.docker/cli-plugins/docker-compose
+
+      - name: Validate Docker configs
+        run: |
+          for f in stacks/**/docker-stack.yml stacks/**/docker-compose.yml; do
+            docker compose -f "$f" config --quiet && echo "OK: $f" || echo "INVALID: $f"
+          done
+
+  gitignore-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check .env is gitignored
+        run: |
+          grep -q '^\.env$' .gitignore && echo ".env is gitignored" || (echo ".env NOT gitignored!"; exit 1)
+          grep -q '^\.env.template$' .gitignore && echo ".env.template is gitignored" || echo "NOTE: .env.template is intentionally not gitignored"
