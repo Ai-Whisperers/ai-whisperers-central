@@ -5,6 +5,22 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed (compliance)
+- README.md: terminology updated to use generic "messaging" wording in
+  product descriptions. The Evolution API integration (upstream OSS
+  project name) remains named as such per OSS carve-out.
+- `scripts/send-whatsapp-alert.sh` renamed to `scripts/send-alert.sh`
+  with EVO_URL instance name updated to `hermes-bridge`.
+
+### Notes
+- Historic changelog entries below reference WhatsApp by name because
+  they describe the historical product surface; they are not rewritten
+  per the project policy of preserving historical accuracy.
+
+
+
 ## [0.8.0] - 2026-04-13
 
 ### Added
