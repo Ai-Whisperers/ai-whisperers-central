@@ -1,6 +1,6 @@
 # AIW Infrastructure
 
-> Infrastructure as Code for the AI Whisperers platform — WhatsApp AI bot (Nyx), model routing, workflow orchestration, and all supporting services. 100% free AI models.
+> Infrastructure as Code for the AI Whisperers platform — Nyx messaging bot, model routing, workflow orchestration, and all supporting services. The Nyx bot integrates with the Evolution API bridge (an upstream OSS project) for WhatsApp Business connectivity. 100% free AI models.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![AI Whisperers](https://img.shields.io/badge/Org-Ai--Whisperers-8B5CF6?logo=github)](https://github.com/Ai-Whisperers)
@@ -9,12 +9,12 @@
 
 This repository manages the complete infrastructure for the AI Whisperers AI platform:
 
-- **Nyx** — WhatsApp AI bot with multi-turn conversation, voice/image understanding, web search, and knowledge base
+- **Nyx** — Messaging AI bot with multi-turn conversation, voice/image understanding, web search, and knowledge base
 - **LiteLLM** — Smart model routing across free AI providers (Groq, Mistral, Cerebras, OpenRouter, etc.)
 - **n8n** — Workflow orchestration for the Nyx pipeline (v23, 21 nodes)
-- **Evolution API** — WhatsApp Business connectivity
-- **Hermes** — Java-based code agent accessible via WhatsApp `/hermes` command
-- **Monitoring** — Prometheus + Grafana with WhatsApp alerting
+- **Evolution API** — Messaging channel connectivity (upstream OSS WhatsApp bridge)
+- **Hermes** — Java-based code agent accessible via the messaging gateway `/hermes` command
+- **Monitoring** — Prometheus + Grafana with messaging alert notifications
 
 All services run on a single 32GB VPS via Docker Swarm with Traefik reverse proxy and automatic SSL.
 
@@ -46,7 +46,7 @@ All services run on a single 32GB VPS via Docker Swarm with Traefik reverse prox
               │   │(Llama 4)│        │   Base    │  │
               │   └─────────┘        └───────────┘  │
               │                                      │
-              └────────────── WhatsApp ──────────────┘
+              └────────── messaging channel ─────────┘
 ```
 
 ## Repository Structure
@@ -55,7 +55,7 @@ All services run on a single 32GB VPS via Docker Swarm with Traefik reverse prox
 ├── stacks/                    # Docker Swarm/Compose stack files
 │   ├── n8n/                   # n8n workflow engine
 │   ├── litellm/               # LiteLLM model router
-│   ├── evolution/             # Evolution API (WhatsApp)
+│   ├── evolution/             # Evolution API (messaging channel)
 │   ├── postgres/              # PostgreSQL databases
 │   ├── monitoring/            # Prometheus + Grafana
 │   └── aiw-code-agent/        # Hermes Java code agent

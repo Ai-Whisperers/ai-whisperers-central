@@ -1,9 +1,9 @@
 #!/bin/bash
-# Send WhatsApp alert via Evolution API
-# Usage: send-whatsapp-alert.sh "message"
+# Send alert via Evolution API (messaging bridge)
+# Usage: send-alert.sh "message"
 MSG="$1"
 NUMBER="595981324569"
-EVO_URL="https://evolution.sunstein.cloud/message/sendText/hermes-whatsapp"
+EVO_URL="https://evolution.sunstein.cloud/message/sendText/hermes-bridge"
 EVO_KEY="a53c00ff3726d2ced6bbfeba8d1a1e90"
 curl -sk --max-time 10 -X POST "$EVO_URL" \
   -H "Content-Type: application/json" \
